@@ -13,7 +13,6 @@ public interface OrderService {
     List<Order> findAll();
     Order findById(UUID id);
     Order create(OrderRequest request);
-    Order update(UUID id, OrderRequest request);
     void deleteById(UUID id);
 
     // Thanh toán VNPay

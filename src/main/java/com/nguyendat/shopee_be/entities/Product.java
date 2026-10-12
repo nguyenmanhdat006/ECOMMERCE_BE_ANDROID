@@ -80,9 +80,6 @@ public class Product {
     @OneToMany(mappedBy = "product", cascade = CascadeType.ALL)
     private List<StockMovement> stockMovements;
     
-    @OneToMany(mappedBy = "product", cascade = CascadeType.ALL)
-    private List<ProductStatus> productStatuses;
-    
     
     @PrePersist
     protected void onCreate() {

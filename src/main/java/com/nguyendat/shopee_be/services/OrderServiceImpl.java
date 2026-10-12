@@ -1,7 +1,6 @@
 package com.nguyendat.shopee_be.services;
 
 import com.nguyendat.shopee_be.repositories.UserDetailRepository;
-import com.nguyendat.shopee_be.config.NotificationSocketHandler;
 import com.nguyendat.shopee_be.dto.OrderRequest;
 import com.nguyendat.shopee_be.entities.*;
 import com.nguyendat.shopee_be.exceptions.ResourceNotFoundEx;
@@ -63,9 +62,6 @@ public class OrderServiceImpl implements OrderService {
 
     @Autowired
     private OrderStatusHistoryRepository statusHistoryRepository;
-
-    @Autowired
-    private NotificationSocketHandler notificationSocketHandler;
 
     @Autowired
     private DashboardService dashboardService; 
@@ -151,11 +147,6 @@ public class OrderServiceImpl implements OrderService {
     @Override
     public void deleteById(UUID id) {
         orderRepository.deleteById(id);
-    }
-
-    @Override
-    public Order update(UUID id, OrderRequest request) {
-        throw new UnsupportedOperationException("Unimplemented method 'update'");
     }
 
     @Override
@@ -273,21 +264,6 @@ public class OrderServiceImpl implements OrderService {
         order.setUpdatedAt(new Date());
         Order savedOrder = orderRepository.save(order);
 
-        // 6️⃣  Gửi thông báo NOTIFICATION qua NotificationSocketHandler
-        try {
-            Map<String, Object> payload = new HashMap<>();
-            payload.put("type", "ORDER_STATUS");
-            payload.put("orderId", order.getId().toString());
-            payload.put("oldStatus", oldStatus.name());
-            payload.put("newStatus", newStatus.name());
-            payload.put("changedBy", changedBy);
-            payload.put("timestamp", System.currentTimeMillis());
-
-            notificationSocketHandler.broadcastNotification(payload);
-        } catch (Exception e) {
-            System.err.println("❌ Failed to broadcast WebSocket notification: " + e.getMessage());
-        }
-
         // 7️⃣  GỬI DASHBOARD EVENT: ORDER_STATUS_CHANGED
         try {
             dashboardService.pushOrderStatusChanged(
@@ -316,21 +292,6 @@ public class OrderServiceImpl implements OrderService {
         order.setPaymentStatus(newStatus);
         order.setUpdatedAt(new Date());
         Order saved = orderRepository.save(order);
-
-        //  Gửi NOTIFICATION WebSocket
-        try {
-            Map<String, Object> payload = new HashMap<>();
-            payload.put("type", "PAYMENT_STATUS");
-            payload.put("orderId", order.getId().toString());
-            payload.put("oldPaymentStatus", oldPaymentStatus != null ? oldPaymentStatus.name() : null);
-            payload.put("newPaymentStatus", newStatus.name());
-            payload.put("changedBy", changedBy);
-            payload.put("timestamp", System.currentTimeMillis());
-
-            notificationSocketHandler.broadcastNotification(payload);
-        } catch (Exception e) {
-            System.err.println("❌ Failed to broadcast payment status WebSocket notification: " + e.getMessage());
-        }
 
         //  GỬI DASHBOARD EVENT nếu thanh toán thành công
         try {
