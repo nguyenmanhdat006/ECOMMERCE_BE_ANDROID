@@ -13,6 +13,7 @@ import java.util.UUID;
 @Builder
 public class ProductVariantResponse {
     private UUID id;
+    private UUID productId;
     private String color;
     private String size;
     private Integer stockQuantity;

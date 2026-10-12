@@ -52,15 +52,13 @@ public class ProductController {
 
     //   create Product
     @PostMapping
-    public ResponseEntity<Product> createProduct(@RequestBody ProductDto productDto){
-        Product product = productService.addProduct(productDto);
-        return new ResponseEntity<>(product,HttpStatus.CREATED);
+    public ResponseEntity<ProductDto> createProduct(@RequestBody ProductDto productDto){
+        return new ResponseEntity<>(productService.addProduct(productDto),HttpStatus.CREATED);
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<Product> updateProduct(@RequestBody ProductDto productDto,@PathVariable UUID id){
-        Product product = productService.updateProduct(productDto,id);
-        return new ResponseEntity<>(product,HttpStatus.OK);
+    public ResponseEntity<ProductDto> updateProduct(@RequestBody ProductDto productDto,@PathVariable UUID id){
+        return new ResponseEntity<>(productService.updateProduct(productDto,id),HttpStatus.OK);
     }
 
     @DeleteMapping("/{id}")

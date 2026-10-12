@@ -1,6 +1,6 @@
 # API Contract – ShopEase Backend
 
-Phiên bản 1.0 – 13/10/2026. Nội dung được lập từ mã nguồn và **đã kiểm chứng bằng cách gọi thật từng API** (bộ test `ApiFlowIT`, xem mục 14). Các ví dụ phản hồi là kết quả thật; riêng id, email, token đã rút gọn.
+Phiên bản 1.1 – 13/10/2026 (đã cập nhật sau khi khắc phục các lỗi phát hiện ở bản 1.0). Nội dung được lập từ mã nguồn và **đã kiểm chứng bằng cách gọi thật từng API** (bộ test `ApiFlowIT`, xem mục 14). Các ví dụ phản hồi là kết quả thật; riêng id, email, token đã rút gọn.
 
 ## 0. Quy ước chung
 
@@ -38,11 +38,12 @@ Ngoại lệ: các API `register` trả lỗi dạng `{ "code": 400, "message": 
 | 201 | Tạo mới thành công |
 | 204 | Xóa thành công, không có nội dung (chỉ sản phẩm và người dùng); các lệnh xóa khác trả 200 thân rỗng |
 | 302 | Chuyển hướng (callback VNPAY) |
-| 400 | Dữ liệu sai, sai kiểu (ví dụ UUID sai định dạng), chuyển trạng thái đơn sai luồng |
+| 400 | Dữ liệu sai hoặc thiếu (kiểm tra đầu vào), sai kiểu (ví dụ UUID sai định dạng), chuyển trạng thái đơn sai luồng, thao tác không hợp lệ với trạng thái hiện tại |
 | 401 | Chưa đăng nhập, token sai hoặc hết hạn, sai email hoặc mật khẩu |
 | 403 | Đã đăng nhập nhưng không đủ quyền |
 | 404 | Không tìm thấy dữ liệu |
-| 500 | Lỗi máy chủ (có một số lỗi nghiệp vụ đang trả 500, xem mục 14.2) |
+| 409 | Xung đột dữ liệu: trùng mã (đơn, phiếu, slug), không đủ tồn kho, đối tượng đang được tham chiếu nên không xóa được |
+| 500 | Lỗi máy chủ không lường trước |
 
 Ví dụ 401 và 403:
 
@@ -235,7 +236,7 @@ Request tạo/sửa:
 
 Phản hồi: `{ "id": "0af7e4e0-...", "name": "...", "code": "...", "description": "..." }`.
 
-Xóa loại còn sản phẩm tham chiếu trả **500** (lỗi khóa ngoại), chưa phải 409.
+Xóa loại còn sản phẩm tham chiếu trả **409**.
 
 ## 5. Sản phẩm
 
@@ -268,7 +269,7 @@ Tham số của `GET /api/products/search` (đều tùy chọn):
 
 | Tham số | Kiểu | Mặc định | Mô tả |
 | --- | --- | --- | --- |
-| `keyword` | string | – | Tìm trong tên, mô tả, thương hiệu; **phân biệt dấu** (`ao` không khớp `Áo`) |
+| `keyword` | string | – | Tìm trong tên, mô tả, thương hiệu; không phân biệt hoa thường và dấu tiếng Việt (`ao` khớp `Áo`, `dep` khớp `Đẹp`) |
 | `categoryId`, `typeId` | uuid | – | Lọc danh mục, loại |
 | `brand` | string | – | Khớp chính xác, không phân biệt hoa thường |
 | `minPrice`, `maxPrice` | số | – | Khoảng giá |
@@ -287,11 +288,11 @@ Phản hồi 200:
 
 ### 5.3. Thêm, sửa, xóa sản phẩm (Admin)
 
-| Method | Endpoint | Mã |
-| --- | --- | --- |
-| POST | `/api/products` | 201 |
-| PUT | `/api/products/{id}` | 200 |
-| DELETE | `/api/products/{id}` | 204 |
+| Method | Endpoint | Mô tả | Mã |
+| --- | --- | --- | --- |
+| POST | `/api/products` | Tạo sản phẩm (kèm biến thể) | 201 |
+| PUT | `/api/products/{id}` | Cập nhật một phần | 200 |
+| DELETE | `/api/products/{id}` | Xóa sản phẩm chưa phát sinh đơn hàng, phiếu nhập, biến động kho | 204 |
 
 Request tạo (`ProductDto`):
 
@@ -304,7 +305,7 @@ Request tạo (`ProductDto`):
 | `categoryId` | uuid | Có | Danh mục |
 | `categoryTypeId` | uuid | Có | Loại |
 | `description` | string | Không | Tối đa 255 ký tự |
-| `newArrival` | boolean | Không | Hàng mới |
+| `newArrival` | boolean | Không | Hàng mới (mặc định `false`) |
 | `variants` | mảng | Không | Mỗi phần tử: `color`, `size`, `stockQuantity` (số nguyên ≥ 0) |
 | `productResources` | mảng | Không | Mỗi phần tử: `name`, `url`, `type`, `isPrimary` |
 
@@ -316,9 +317,17 @@ Request tạo (`ProductDto`):
 }
 ```
 
-Phản hồi 201 và 200 là **entity sản phẩm** (không phải `ProductDto`): có `createdAt`, `updatedAt`, `productVariants` (kèm các mảng `orderItems`, `cartItems`... rỗng hoặc null), `resources`, `newArrival`. Nên gọi lại `GET /api/products/{id}` để lấy dạng chuẩn.
+Phản hồi 201 và 200 là **`ProductDto` đầy đủ** như mục 5.1 (có `categoryName`, `variants`, `productResources`, `newArrival`).
 
-PUT ghi đè toàn bộ thông tin từ nội dung gửi lên, vì vậy cần gửi đầy đủ các trường bắt buộc; trường không gửi sẽ thành `null` (ví dụ `rating`). Xóa sản phẩm là xóa cứng và kéo theo biến thể, ảnh, dòng giỏ hàng.
+Lỗi: 400 thiếu trường bắt buộc hoặc giá âm; 404 danh mục hoặc loại không tồn tại; 409 trùng `slug`.
+
+**PUT cập nhật một phần**: chỉ ghi các trường có gửi lên (`name`, `description`, `price`, `brand`, `slug`, `newArrival`, `categoryId`, `categoryTypeId`); trường không gửi được giữ nguyên. `variants`, `productResources` và `rating` không được sửa qua PUT (biến thể và ảnh có API riêng, `rating` do hệ thống tính từ đánh giá).
+
+```json
+{ "price": 259000 }
+```
+
+**DELETE** là xóa cứng kèm biến thể, ảnh, dòng giỏ hàng. Sản phẩm đã có đơn hàng, phiếu nhập hoặc biến động kho trả **409** (không xóa để tránh mất lịch sử).
 
 ### 5.4. Ảnh sản phẩm
 
@@ -352,27 +361,45 @@ PUT và DELETE 200: `{ "message": "Primary resource updated successfully", "succ
 
 ### 5.5. Biến thể (`/api/product-variants`)
 
-| Method | Endpoint | Quyền | Ghi chú |
+| Method | Endpoint | Quyền | Mã |
 | --- | --- | --- | --- |
-| GET | `/api/product-variants`, `/api/product-variants/{id}` | User | 200; 401 nếu chưa đăng nhập |
-| POST, PUT, DELETE | `/api/product-variants[/{id}]` | Admin | **Không dùng được**: xem 14.2 |
+| GET | `/api/product-variants`, `/api/product-variants/{id}` | User | 200 |
+| POST | `/api/product-variants` | Admin | 201 |
+| PUT | `/api/product-variants/{id}` | Admin | 200 |
+| DELETE | `/api/product-variants/{id}` | Admin | 200 (thân rỗng) |
 
-GET trả entity: `{ "id", "color", "size", "stockQuantity", "orderItems": [], "cartItems": [], "inventoryReceiptItems": [], "stockMovements": [] }`.
+Đối tượng trả về (`ProductVariantResponse`):
 
-Hiện biến thể chỉ tạo được kèm sản phẩm (mục 5.3). `POST /api/product-variants` luôn lỗi 500 vì trường `product` không đọc được từ JSON.
+```json
+{ "id": "f26cc957-...", "productId": "7c710c58-...", "color": "Den", "size": "M", "stockQuantity": 10 }
+```
 
-## 6. Địa chỉ (`/api/addresses`, User)
+Request tạo (sửa dùng cùng cấu trúc, `productId` được bỏ qua):
+
+| Trường | Kiểu | Bắt buộc | Mô tả |
+| --- | --- | --- | --- |
+| `productId` | uuid | Có (khi tạo) | Sản phẩm đã tồn tại |
+| `color` | string | Có | Màu |
+| `size` | string | Có | Kích cỡ |
+| `stockQuantity` | số nguyên | Có | Tồn kho, ≥ 0 |
+
+Lỗi: 400 thiếu hoặc sai trường; 404 sản phẩm hoặc biến thể không tồn tại; 403 nếu không phải Admin; **409** khi xóa biến thể đã phát sinh đơn hàng, phiếu nhập hoặc biến động kho.
+
+Tồn kho thay đổi tự động theo đơn hàng và phiếu nhập (mục 8 và 11); `PUT` chỉ nên dùng để điều chỉnh thủ công.
+
+## 6. Địa chỉ (`/api/addresses`)
 
 Đối tượng địa chỉ: `id`, `name`, `street`, `city`, `state`, `zipCode`, `phoneNumber` (phản hồi danh sách có thêm `userId`).
 
-| Method | Endpoint | Mô tả | Mã |
-| --- | --- | --- | --- |
-| GET | `/api/addresses/my-addresses` | Địa chỉ của tôi | 200 |
-| POST | `/api/addresses` | Thêm địa chỉ cho người đang đăng nhập | 201 |
-| PUT | `/api/addresses/{id}` | Sửa; chỉ chủ sở hữu, người khác nhận **403** thân rỗng | 200 |
-| DELETE | `/api/addresses/{id}` | Xóa; chỉ chủ sở hữu, người khác **403** | 200 (rỗng) |
-| GET | `/api/addresses/user/{userId}` | Địa chỉ của một user (404 nếu user không tồn tại) | 200 |
-| GET | `/api/addresses`, `/api/addresses/{id}` | Tra cứu | 200 |
+| Method | Endpoint | Quyền | Mô tả | Mã |
+| --- | --- | --- | --- | --- |
+| GET | `/api/addresses/my-addresses` | User | Địa chỉ của tôi | 200 |
+| POST | `/api/addresses` | User | Thêm địa chỉ cho người đang đăng nhập | 201 |
+| PUT | `/api/addresses/{id}` | Chủ sở hữu | Sửa; người khác nhận **403** thân rỗng | 200 |
+| DELETE | `/api/addresses/{id}` | Chủ sở hữu | Xóa; người khác **403** | 200 (rỗng) |
+| GET | `/api/addresses/{id}` | Chủ sở hữu hoặc Admin | Chi tiết một địa chỉ; người khác **403** | 200 |
+| GET | `/api/addresses/user/{userId}` | Chính user đó hoặc Admin | Địa chỉ của một user; người khác **403**; 404 nếu user không tồn tại | 200 |
+| GET | `/api/addresses` | **Admin** | Tất cả địa chỉ | 200 |
 
 Request thêm/sửa:
 
@@ -391,27 +418,34 @@ Request thêm/sửa:
 
 Phản hồi 201: `{ "id": "3b03417e-...", "name": "Nhà riêng", "street": "...", "city": "...", "state": "...", "zipCode": "...", "phoneNumber": "..." }`.
 
-## 7. Giỏ hàng (`/api/carts`, User)
+## 7. Giỏ hàng (`/api/carts`)
 
 Đối tượng `CartDto`: `id`, `quantity`, `createdAt`, `updatedAt`, `userId`, `productId`, `productVariantId`.
 
-| Method | Endpoint | Mô tả | Mã |
-| --- | --- | --- | --- |
-| POST | `/api/carts` | Thêm dòng giỏ | 201 |
-| PUT | `/api/carts/{id}` | Sửa dòng giỏ (gửi lại đủ các trường) | 200 |
-| GET | `/api/carts/{id}` | Một dòng giỏ (`CartDto`) | 200 |
-| GET | `/api/carts/user/{userId}` | Giỏ của một user kèm thông tin sản phẩm | 200 |
-| GET | `/api/carts` | Tất cả dòng giỏ | 200 |
-| DELETE | `/api/carts/{id}` | Xóa dòng giỏ | 200 (rỗng) |
+| Method | Endpoint | Quyền | Mô tả | Mã |
+| --- | --- | --- | --- | --- |
+| POST | `/api/carts` | User | Thêm vào giỏ của **người đang đăng nhập** | 201 |
+| PUT | `/api/carts/{id}` | Chủ giỏ hoặc Admin | Đặt lại số lượng | 200 |
+| GET | `/api/carts/{id}` | Chủ giỏ hoặc Admin | Một dòng giỏ (`CartDto`) | 200 |
+| GET | `/api/carts/user/{userId}` | Chủ giỏ hoặc Admin | Giỏ của một user kèm thông tin sản phẩm | 200 |
+| GET | `/api/carts` | **Admin** | Tất cả dòng giỏ | 200 |
+| DELETE | `/api/carts/{id}` | Chủ giỏ hoặc Admin | Xóa dòng giỏ | 200 (rỗng) |
+
+Người không phải chủ giỏ (và không phải Admin) nhận **403**.
 
 Request thêm/sửa:
 
 | Trường | Kiểu | Bắt buộc | Mô tả |
 | --- | --- | --- | --- |
-| `userId` | uuid | Có | Chủ giỏ (hiện do client gửi) |
-| `productId` | uuid | Có | Sản phẩm |
-| `productVariantId` | uuid | Có | Biến thể |
+| `productVariantId` | uuid | Có | Biến thể muốn mua; sản phẩm được suy ra từ biến thể |
 | `quantity` | số nguyên | Có | Lớn hơn 0 |
+| `productId` | uuid | Không | Nếu gửi phải khớp với biến thể, nếu không trả 400 |
+
+```json
+{ "productVariantId": "f26cc957-...", "quantity": 2 }
+```
+
+Quy tắc: `userId` luôn lấy từ token. Thêm lại cùng một biến thể thì **cộng dồn** số lượng vào dòng đã có. Tổng số lượng vượt tồn kho trả **400** (`"Số lượng vượt quá tồn kho (hiện còn N)"`).
 
 Phản hồi `GET /api/carts/user/{userId}`:
 
@@ -425,89 +459,84 @@ Phản hồi `GET /api/carts/user/{userId}`:
 } ]
 ```
 
-Hệ thống chưa kiểm tra `quantity` so với tồn kho (thêm 9999 vẫn trả 201).
-
 ## 8. Đơn hàng (`/api/orders`)
 
 ### 8.1. Bảng endpoint
 
 | Method | Endpoint | Quyền | Mô tả | Mã |
 | --- | --- | --- | --- | --- |
-| POST | `/api/orders` | User | Tạo đơn | 201 |
+| POST | `/api/orders` | User | Tạo đơn (người đặt là người đang đăng nhập) | 201 |
 | GET | `/api/orders/me` | User | Đơn của tôi (theo token) | 200 |
 | GET | `/api/orders/unreviewed` | User | Chi tiết đơn đã mua chưa đánh giá | 200 |
-| GET | `/api/orders/{id}` | User | Chi tiết đơn (404 nếu không có) | 200 |
+| GET | `/api/orders/{id}` | Chủ đơn hoặc Admin | Chi tiết đơn; người khác **403**; 404 nếu không có | 200 |
 | GET | `/api/orders` | **Admin** | Tất cả đơn | 200 |
-| PATCH | `/api/orders/{id}/status?changedBy=` | **Admin** | Đổi trạng thái đơn | 200 |
-| PATCH | `/api/orders/{id}/payment-status?changedBy=` | User | Đổi trạng thái thanh toán | 200 |
-| DELETE | `/api/orders/{id}` | User | Xóa đơn | 200 (rỗng) |
+| PATCH | `/api/orders/{id}/status` | **Admin** | Đổi trạng thái đơn | 200 |
+| PATCH | `/api/orders/{id}/payment-status` | **Admin** | Đổi trạng thái thanh toán | 200 |
+| DELETE | `/api/orders/{id}` | **Admin** | Xóa đơn đã hủy hoặc đã hoàn trả | 200 (rỗng) |
 
 ### 8.2. `POST /api/orders` – Tạo đơn
 
 | Trường | Kiểu | Bắt buộc | Mô tả |
 | --- | --- | --- | --- |
-| `customerId` | uuid | Có | Người đặt (hiện do client gửi) |
-| `orderNumber` | string | Có | Mã đơn, **duy nhất** |
-| `totalAmount` | số | Có | Tổng tiền (VND) |
-| `status` | string | Có | Trạng thái ban đầu, dùng `PENDING` |
-| `paymentMethod` | string | Có | `COD` hoặc `VNPAY` |
 | `shippingAddress` | string | Có | Địa chỉ giao dạng chuỗi |
-| `notes` | string | Không | Ghi chú |
-| `orderItems` | mảng | Có | Danh sách dòng chi tiết |
-| `orderItems[].productId` | uuid | Có | Sản phẩm |
-| `orderItems[].productVariantId` | uuid | Có | Biến thể |
+| `orderItems` | mảng | Có | Ít nhất một dòng |
+| `orderItems[].productVariantId` | uuid | Có | Biến thể muốn mua |
 | `orderItems[].quantity` | số nguyên | Có | Lớn hơn 0 |
-| `orderItems[].unitPrice` | số | Có | Đơn giá |
-| `orderItems[].totalPrice` | số | Có | Thành tiền |
+| `orderItems[].productId` | uuid | Không | Nếu gửi phải khớp với biến thể |
+| `paymentMethod` | string | Không | `COD` (mặc định) hoặc `VNPAY`; giá trị khác trả 400 |
+| `orderNumber` | string | Không | Mã đơn; bỏ trống thì máy chủ tự sinh (`SE-yyyyMMddHHmmss-XXXX`); **trùng trả 409** |
+| `notes` | string | Không | Ghi chú |
+
+Các trường `customerId`, `status`, `totalAmount`, `orderItems[].unitPrice`, `orderItems[].totalPrice` nếu gửi sẽ **bị bỏ qua**: người đặt lấy từ token, trạng thái luôn là `PENDING`, đơn giá lấy từ giá sản phẩm, thành tiền và tổng tiền do máy chủ tính.
 
 ```json
 {
-  "customerId": "bdf369c9-...", "orderNumber": "SE-20261013-001", "totalAmount": 498000, "status": "PENDING",
-  "paymentMethod": "COD", "shippingAddress": "Nguyen Van A - 0911222333 - 12 Nguyễn Trãi, Quận 1, HCM", "notes": "Giao giờ hành chính",
-  "orderItems": [ { "productId": "7c710c58-...", "productVariantId": "f26cc957-...", "quantity": 2, "unitPrice": 249000, "totalPrice": 498000 } ]
+  "orderNumber": "SE-20261013-001", "paymentMethod": "COD",
+  "shippingAddress": "Nguyen Van A - 0911222333 - 12 Nguyễn Trãi, Quận 1, HCM", "notes": "Giao giờ hành chính",
+  "orderItems": [ { "productVariantId": "f26cc957-...", "quantity": 2 } ]
 }
 ```
 
-Phản hồi 201 (entity đơn hàng):
+Phản hồi 201:
 
 ```json
 {
   "id": "f69d7dbd-...", "orderNumber": "SE-20261013-001", "orderDate": "2026-10-12T21:11:35.107+00:00",
-  "totalAmount": 498000, "status": "PENDING", "paymentStatus": "UNPAID", "paymentMethod": "COD",
+  "totalAmount": 518000, "status": "PENDING", "paymentStatus": "UNPAID", "paymentMethod": "COD",
   "shippingAddress": "...", "notes": "Giao giờ hành chính",
-  "orderItems": [ { "id": "b5b8ca9a-...", "quantity": 2, "unitPrice": 249000, "totalPrice": 498000, "isReviewed": false } ],
+  "orderItems": [ { "id": "b5b8ca9a-...", "quantity": 2, "unitPrice": 259000, "totalPrice": 518000, "isReviewed": false } ],
   "updatedAt": null
 }
 ```
 
-Lưu ý: máy chủ lưu nguyên số liệu client gửi (không tính lại giá), **chưa trừ tồn kho**, chưa xóa giỏ hàng. Trùng `orderNumber` trả 500.
+Quy tắc: toàn bộ đơn được xử lý trong một giao dịch. **Tồn kho bị trừ ngay** khi tạo đơn và mỗi lần trừ được ghi vào sổ biến động kho (`stock_movements`, loại `OUT`). Không đủ hàng ở bất kỳ dòng nào thì cả đơn bị từ chối với **409** và tồn kho giữ nguyên. Lỗi khác: 400 (không có sản phẩm, thiếu địa chỉ, số lượng ≤ 0, `paymentMethod` sai, biến thể không thuộc `productId`), 404 (biến thể không tồn tại).
 
 ### 8.3. `GET /api/orders/me`, `GET /api/orders/{id}`, `GET /api/orders` – Dạng `OrderResponse`
 
 ```json
 {
   "id": "f69d7dbd-...", "orderNumber": "SE-20261013-001", "orderDate": "2026-10-12T21:11:35.107+00:00",
-  "totalAmount": 498000.00, "status": "PENDING", "paymentMethod": "COD",
-  "shippingAddress": "...", "notes": "...", "customerId": "bdf369c9-...",
+  "totalAmount": 518000.00, "status": "PENDING", "paymentStatus": "UNPAID", "paymentMethod": "COD",
+  "shippingAddress": "...", "notes": "...", "customerId": "bdf369c9-...", "customerName": "Lan Nguyen",
   "orderItems": [ {
-    "id": "b5b8ca9a-...", "quantity": 2, "unitPrice": 249000.00, "totalPrice": 498000.00,
+    "id": "b5b8ca9a-...", "quantity": 2, "unitPrice": 259000.00, "totalPrice": 518000.00,
     "productId": "7c710c58-...", "productVariantId": "f26cc957-...", "productName": "Ao test",
     "isReviewed": false, "thumbnail": "http://localhost:8080/uploads/..."
   } ]
 }
 ```
 
-`OrderResponse` **không có `paymentStatus`**; chỉ phản hồi của POST và PATCH (entity) mới có. `GET /api/orders/unreviewed` trả mảng `OrderItemResponse` (cùng cấu trúc phần tử `orderItems` ở trên).
+`GET /api/orders/unreviewed` trả mảng `OrderItemResponse` (cùng cấu trúc phần tử `orderItems` ở trên).
 
-### 8.4. `PATCH /api/orders/{id}/status?changedBy=<tên>` – Đổi trạng thái (Admin)
+### 8.4. `PATCH /api/orders/{id}/status` – Đổi trạng thái (Admin)
 
-Tham số query `changedBy` (bắt buộc): tên người thực hiện, ghi vào lịch sử. Body:
+Body:
 
 ```json
 { "status": "SHIPPING" }
 ```
 
-Giá trị `status`: `PENDING`, `SHIPPING`, `WAIT_DELIVER`, `PAID`, `CANCELED`, `REFUND`. Luồng hợp lệ:
+Người thực hiện được ghi vào lịch sử lấy từ **token** của Admin (tham số query `changedBy` không còn bắt buộc và bị bỏ qua). Giá trị `status`: `PENDING`, `SHIPPING`, `WAIT_DELIVER`, `PAID`, `CANCELED`, `REFUND`. Luồng hợp lệ:
 
 | Từ | Sang |
 | --- | --- |
@@ -523,15 +552,15 @@ Phản hồi 200: entity đơn như mục 8.2 (với `status` mới, `updatedAt`
 { "status": 400, "error": "Bad Request", "message": "Không thể chuyển từ trạng thái PENDING sang PAID", "path": "..." }
 ```
 
-Giá trị `status` sai tên trả 400 `"No enum constant com.nguyendat.shopee_be.entities.OrderStatus.ABC"`. Chuyển sang `CANCELED` hoặc `REFUND` cộng trả số lượng vào kho từng biến thể. Mỗi lần đổi ghi một dòng `order_status_history`.
+Giá trị `status` sai tên trả 400. Chuyển sang `CANCELED` hoặc `REFUND` **cộng trả đúng số lượng đã trừ** vào kho từng biến thể (ghi sổ loại `IN`). Mỗi lần đổi ghi một dòng `order_status_history`.
 
-### 8.5. `PATCH /api/orders/{id}/payment-status?changedBy=` – Trạng thái thanh toán
+### 8.5. `PATCH /api/orders/{id}/payment-status` – Trạng thái thanh toán (Admin)
 
-Body `{ "status": "PAID" }` với `status` thuộc `UNPAID`, `PAID`, `FAILED`, `REFUND`. Phản hồi 200: entity đơn (có `paymentStatus`). Hiện mọi người dùng đã đăng nhập đều gọi được (xem 14.2).
+Body `{ "status": "PAID" }` với `status` thuộc `UNPAID`, `PAID`, `FAILED`, `REFUND`. Phản hồi 200: entity đơn (có `paymentStatus`). Người dùng thường nhận **403**; khách thanh toán qua VNPAY thì trạng thái được cập nhật tự động (mục 9).
 
-### 8.6. `DELETE /api/orders/{id}`
+### 8.6. `DELETE /api/orders/{id}` (Admin)
 
-200 thân rỗng nếu đơn chưa có lịch sử trạng thái. Đơn đã có lịch sử trạng thái trả **500** do khóa ngoại. Mọi người dùng đăng nhập xóa được đơn bất kỳ (xem 14.2).
+Chỉ xóa được đơn ở trạng thái `CANCELED` hoặc `REFUND` (xóa kèm lịch sử trạng thái); đơn ở trạng thái khác trả **400**. Người dùng thường nhận **403**.
 
 ## 9. Thanh toán VNPAY
 
@@ -539,97 +568,129 @@ Body `{ "status": "PAID" }` với `status` thuộc `UNPAID`, `PAID`, `FAILED`, `
 
 | Trường | Kiểu | Bắt buộc | Mô tả |
 | --- | --- | --- | --- |
-| `orderId` | uuid | Có | Mã đơn (404 nếu không tồn tại) |
-| `amount` | số | Có | Số tiền VND; gửi VNPAY nhân 100 |
+| `orderId` | uuid | Có | Đơn của chính người đang đăng nhập (Admin được phép với mọi đơn) |
 
 ```json
-{ "orderId": "ccf79480-...", "amount": 249000 }
+{ "orderId": "ccf79480-..." }
 ```
 
-Phản hồi 200 (text thuần, một URL đã ký HMAC-SHA512):
+Số tiền **lấy từ tổng tiền của đơn** (trường `amount` nếu gửi sẽ bị bỏ qua). Phản hồi 200 (text thuần, URL đã ký HMAC-SHA512):
 
 ```text
-https://sandbox.vnpayment.vn/paymentv2/vpcpay.html?vnp_Amount=24900000&vnp_Command=pay&vnp_CreateDate=20261013041151&vnp_CurrCode=VND&...&vnp_SecureHash=...
+https://sandbox.vnpayment.vn/paymentv2/vpcpay.html?vnp_Amount=25900000&vnp_Command=pay&vnp_CreateDate=20261013041151&vnp_CurrCode=VND&...&vnp_SecureHash=...
 ```
 
-Cần cấu hình `VNPAY_TMN_CODE` và `VNPAY_HASH_SECRET`; `vnp_ReturnUrl` trỏ về frontend (`VNPAY_RETURN_URL_BASE/vnpay-done/{orderId}`).
+Lỗi: 404 đơn không tồn tại; 403 đơn của người khác; 409 đơn đã thanh toán; 400 đơn đã hủy hoặc hoàn trả, hoặc chưa cấu hình `VNPAY_TMN_CODE` và `VNPAY_HASH_SECRET`; 401 chưa đăng nhập. `vnp_ReturnUrl` trỏ về frontend (`VNPAY_RETURN_URL_BASE/vnpay-done/{orderId}`).
 
 ### 9.2. `GET /api/vnpay/return` (Public)
 
-Frontend gọi lại endpoint này với toàn bộ tham số VNPAY trả về. Tham số cần có: `vnp_TxnRef` (mã đơn), `vnp_ResponseCode`, `vnp_Amount`, `vnp_BankCode`, `vnp_CardType`, `vnp_OrderInfo`, `vnp_PayDate`, `vnp_TransactionNo`.
-
-Kết quả 302, header `Location`:
+Frontend gọi lại endpoint này với toàn bộ tham số VNPAY trả về (`vnp_TxnRef`, `vnp_Amount`, `vnp_ResponseCode`, `vnp_BankCode`, `vnp_CardType`, `vnp_OrderInfo`, `vnp_PayDate`, `vnp_TransactionNo`, `vnp_SecureHash`...). Kết quả luôn là **302** về frontend:
 
 ```text
-http://localhost:5173/vnpay-done?orderId=<id>&vnp_Amount=...&vnp_BankCode=...&vnp_CardType=...&vnp_OrderInfo=...&vnp_PayDate=...&vnp_TransactionNo=...&status=success
+http://localhost:5173/vnpay-done?orderId=<id>&vnp_Amount=...&vnp_BankCode=...&...&status=success
 ```
 
-`vnp_ResponseCode=00` thì đơn thành `payment_status = PAID` và `status=success`; khác thì `FAILED` và `status=fail`. Endpoint **không kiểm tra chữ ký** `vnp_SecureHash` và không đối chiếu số tiền; không có `vnp_*` bắt buộc sẽ lỗi (suy ra từ mã nguồn).
+Máy chủ **kiểm tra chữ ký `vnp_SecureHash`** và đối chiếu `vnp_Amount` với tổng tiền đơn × 100:
+
+| Tình huống | Kết quả |
+| --- | --- |
+| Chữ ký đúng, số tiền khớp, `vnp_ResponseCode = 00` | Đơn `payment_status = PAID`, `status=success` |
+| Chữ ký đúng, số tiền khớp, mã khác `00` | Đơn `payment_status = FAILED`, `status=fail` |
+| Thiếu chữ ký, sai chữ ký, sai số tiền, đơn không tồn tại | **Không thay đổi dữ liệu**, `status=fail` |
+| Đơn đã `PAID` | Không đổi trạng thái (gọi lại an toàn) |
+
+Tham số thiếu được coi là chuỗi rỗng, không gây lỗi.
 
 ## 10. Đánh giá (`/api/reviews`)
 
 | Method | Endpoint | Quyền | Mô tả | Mã |
 | --- | --- | --- | --- | --- |
-| POST | `/api/reviews` | User | Viết đánh giá | 200 |
+| POST | `/api/reviews` | User | Viết đánh giá (người viết là người đang đăng nhập) | 201 |
 | GET | `/api/reviews/product/{productId}` | Public | Đánh giá của sản phẩm | 200 |
-| PUT | `/api/reviews/{id}` | User | Sửa đánh giá | 200 |
-| DELETE | `/api/reviews/{id}?userId=<uuid>` | User | Xóa đánh giá của mình | 200 |
-
-Request tạo/sửa:
-
-| Trường | Kiểu | Bắt buộc | Mô tả |
-| --- | --- | --- | --- |
-| `userId` | uuid | Có | Người viết (hiện do client gửi) |
-| `productId` | uuid | Có | Sản phẩm |
-| `orderItemId` | uuid | Có | Chi tiết đơn đã mua, phải thuộc đơn của `userId` |
-| `rating` | số nguyên | Có | 1 đến 5 |
-| `comment` | string | Không | Nhận xét |
-
-```json
-{ "userId": "bdf369c9-...", "productId": "7c710c58-...", "orderItemId": "b5b8ca9a-...", "rating": 5, "comment": "Vải mát, giao nhanh" }
-```
-
-Phản hồi POST/PUT 200: `{ "id": "9d300bf9-...", "rating": 5, "comment": "...", "createdAt": "...", "updatedAt": "..." }`. Sau khi tạo, `order_item.is_reviewed = true` và `product.rating` được tính lại (đã kiểm chứng: đánh giá 5 sao thì rating sản phẩm = 5.0).
-
-Phản hồi GET:
-
-```json
-[ { "id": "9d300bf9-...", "rating": 5, "comment": "...", "createdAt": "...", "updatedAt": "...",
-    "user": { "id": "bdf369c9-...", "firstName": "Lan", "lastName": "Nguyen", "avatar": null,
-              "email": "lan@example.com", "phoneNumber": "0911222333", "enabled": true, "role": null } } ]
-```
-
-Lưu ý: API công khai này **trả cả email và số điện thoại** người đánh giá (xem 14.2).
-
-Lỗi: viết cho item không thuộc mình trả **500** với `message = "Bạn không có quyền đánh giá sản phẩm này!"`; `rating` ngoài 1 đến 5 trả **500** (vi phạm ràng buộc DB).
-
-## 11. Phiếu nhập kho (`/api/inventory-receipts`, Admin)
-
-| Method | Endpoint | Mô tả | Mã |
-| --- | --- | --- | --- |
-| GET | `/api/inventory-receipts` | Danh sách (kèm dòng chi tiết) | 200 |
-| GET | `/api/inventory-receipts/{id}` | Chi tiết | 200 |
-| POST | `/api/inventory-receipts` | Tạo phiếu | 201 |
-| PUT | `/api/inventory-receipts/{id}` | Sửa phiếu | 200 |
-| DELETE | `/api/inventory-receipts/{id}` | Xóa phiếu | 200 (rỗng) |
+| PUT | `/api/reviews/{id}` | Chủ đánh giá | Sửa điểm và nhận xét | 200 |
+| DELETE | `/api/reviews/{id}` | Chủ đánh giá hoặc Admin | Xóa đánh giá | 200 |
 
 Request tạo:
 
 | Trường | Kiểu | Bắt buộc | Mô tả |
 | --- | --- | --- | --- |
-| `receiptNumber` | string | Có | Số phiếu, duy nhất |
-| `supplierName` | string | Có | Nhà cung cấp |
-| `totalAmount` | số | Có | Tổng giá trị |
-| `status` | string | Có | `PENDING`, `APPROVED`, `CANCELLED` (chuỗi tự do) |
-| `notes` | string | Không | Ghi chú |
+| `productId` | uuid | Có | Sản phẩm, phải khớp với dòng đơn |
+| `orderItemId` | uuid | Có | Dòng đơn đã mua, thuộc đơn của chính người viết |
+| `rating` | số nguyên | Có | 1 đến 5 |
+| `comment` | string | Không | Nhận xét |
 
 ```json
-{ "receiptNumber": "PN-001", "supplierName": "Công ty May Việt Tiến", "totalAmount": 1000000, "status": "PENDING", "notes": "Phiếu test" }
+{ "productId": "7c710c58-...", "orderItemId": "b5b8ca9a-...", "rating": 5, "comment": "Vải mát, giao nhanh" }
 ```
 
-Phản hồi 201: `{ "id": "...", "receiptNumber": "PN-001", "supplierName": "...", "receiptDate": "2026-10-12T21:11:55.676+00:00", "totalAmount": 1000000, "status": "PENDING", "notes": "...", "inventoryReceiptItems": null }`. `receiptDate` do hệ thống gán.
+Request sửa (`PUT`): `{ "rating": 4, "comment": "Đã sửa" }`.
 
-Hạn chế đã kiểm chứng: PUT phải gửi **cả `receiptDate`**, nếu thiếu trả 500; không tạo được dòng chi tiết (`inventoryReceiptItems`) qua API này; chuyển phiếu sang `APPROVED` **không** cộng tồn kho.
+Phản hồi POST (201) và PUT (200):
+
+```json
+{ "id": "9d300bf9-...", "rating": 5, "comment": "Vải mát, giao nhanh", "createdAt": "...", "updatedAt": "...",
+  "user": { "id": "bdf369c9-...", "firstName": "Lan", "lastName": "Nguyen", "avatar": null } }
+```
+
+Phản hồi `GET /api/reviews/product/{productId}`: mảng các đối tượng trên. Trường `user` chỉ có `id`, `firstName`, `lastName`, `avatar` (**không có email, số điện thoại**).
+
+Quy tắc và lỗi:
+
+- Chỉ đánh giá được dòng đơn thuộc đơn của mình (khác: **403**) và đơn đã hoàn thành `PAID` (khác: **400**).
+- Mỗi dòng đơn một đánh giá; đánh giá lần hai trả **409**.
+- `rating` ngoài 1 đến 5 trả **400**; `productId` không khớp dòng đơn trả **400**.
+- Sửa hoặc xóa đánh giá của người khác trả **403** (Admin được xóa).
+- Sau khi tạo, `order_item.is_reviewed = true` và `product.rating` được tính lại (đánh giá 5 sao thì rating = 5.0); xóa đánh giá thì dòng đơn được đánh giá lại và rating tính lại.
+
+## 11. Phiếu nhập kho (`/api/inventory-receipts`, Admin)
+
+| Method | Endpoint | Mô tả | Mã |
+| --- | --- | --- | --- |
+| GET | `/api/inventory-receipts` | Danh sách phiếu (kèm dòng chi tiết) | 200 |
+| GET | `/api/inventory-receipts/{id}` | Chi tiết phiếu | 200 |
+| POST | `/api/inventory-receipts` | Tạo phiếu | 201 |
+| PUT | `/api/inventory-receipts/{id}` | Sửa phiếu đang chờ, hoặc duyệt/hủy phiếu qua `status` | 200 |
+| DELETE | `/api/inventory-receipts/{id}` | Xóa phiếu `PENDING` hoặc `CANCELLED` | 200 (rỗng) |
+
+Request tạo và sửa:
+
+| Trường | Kiểu | Bắt buộc | Mô tả |
+| --- | --- | --- | --- |
+| `receiptNumber` | string | Có | Số phiếu, duy nhất (trùng trả 409) |
+| `supplierName` | string | Có | Nhà cung cấp |
+| `items` | mảng | Có | Ít nhất một dòng |
+| `items[].productVariantId` | uuid | Có | Biến thể nhập; sản phẩm suy ra từ biến thể |
+| `items[].quantity` | số nguyên | Có | Lớn hơn 0 |
+| `items[].unitCost` | số | Có | Giá vốn một đơn vị, không âm |
+| `status` | string | Không | `PENDING` (mặc định) hoặc `APPROVED` khi tạo; khi sửa có thể đổi sang `APPROVED` hoặc `CANCELLED` |
+| `notes` | string | Không | Ghi chú |
+
+Ngày nhập và tổng tiền do máy chủ tính.
+
+```json
+{
+  "receiptNumber": "PN-001", "supplierName": "Công ty May Việt Tiến", "status": "PENDING", "notes": "Phiếu test",
+  "items": [ { "productVariantId": "f26cc957-...", "quantity": 5, "unitCost": 100 } ]
+}
+```
+
+Phản hồi 201 và 200:
+
+```json
+{
+  "id": "92dc3ce9-...", "receiptNumber": "PN-001", "supplierName": "Công ty May Việt Tiến",
+  "receiptDate": "2026-10-12T21:11:55.676+00:00", "totalAmount": 500, "status": "PENDING", "notes": "Phiếu test",
+  "items": [ { "id": "...", "productId": "7c710c58-...", "productVariantId": "f26cc957-...", "productName": "Ao test",
+               "color": "Den", "size": "M", "quantity": 5, "unitCost": 100, "totalCost": 500 } ]
+}
+```
+
+Quy tắc:
+
+- **Duyệt phiếu** (`PENDING` sang `APPROVED`, hoặc tạo thẳng với `APPROVED`) **cộng số lượng vào tồn kho** từng biến thể và ghi sổ biến động kho loại `IN`.
+- `APPROVED` và `CANCELLED` là trạng thái cuối: sửa phiếu đã duyệt hoặc đã hủy trả **400**; xóa phiếu đã duyệt trả **400**.
+- Sửa phiếu `PENDING` thay toàn bộ dòng chi tiết bằng danh sách `items` gửi lên.
+- Tạo phiếu không có dòng chi tiết, hoặc `status` ngoài `PENDING`, `APPROVED`, `CANCELLED` trả **400**.
 
 ## 12. Dashboard (Admin)
 
@@ -674,58 +735,59 @@ Khi kết nối nhận ngay `CONNECTION_SUCCESS`; sau đó cứ khoảng 5 giây
 
 ### 14.1. Tóm tắt
 
-Toàn bộ API được gọi thật qua bộ test tích hợp `ApiFlowIT` (đi qua Security filter, controller, service và cơ sở dữ liệu Neon thật; không mở cổng mạng). Dữ liệu tạo ra có tiền tố `apitest-` và được dọn sạch sau mỗi lần chạy. Lần chạy cuối: **122 kiểm tra, 104 đạt, 18 lệch kỳ vọng (đều đã được xác định nguyên nhân), 0 lỗi ngoài dự kiến.**
+Toàn bộ API được gọi thật qua bộ test tích hợp `ApiFlowIT` (đi qua Security filter, controller, service và cơ sở dữ liệu Neon thật; không mở cổng mạng). Dữ liệu tạo ra có tiền tố `apitest-` và được dọn sạch sau mỗi lần chạy. Lần chạy cuối: **174 kiểm tra, 174 đạt**.
 
-| Nhóm kiểm tra | Số kiểm tra | Đạt | Lệch kỳ vọng |
+| Nhóm kiểm tra | Số kiểm tra | Đạt | Không đạt |
 | --- | --- | --- | --- |
-| A. Công khai | 11 | 11 | 0 |
+| A. Công khai | 12 | 12 | 0 |
 | B. Xác thực | 10 | 10 | 0 |
-| C. Phân quyền | 6 | 6 | 0 |
+| C. Phân quyền | 8 | 8 | 0 |
 | D. Quản trị người dùng | 7 | 7 | 0 |
-| E. Danh mục và sản phẩm | 22 | 19 | 3 |
-| F. Địa chỉ | 7 | 7 | 0 |
-| G. Giỏ hàng | 6 | 5 | 1 |
-| H. Đơn hàng | 24 | 18 | 6 |
-| I. Thanh toán VNPAY | 5 | 4 | 1 |
-| J. Đánh giá | 9 | 6 | 3 |
-| K. Kho | 7 | 4 | 3 |
+| E. Danh mục và sản phẩm | 29 | 29 | 0 |
+| F. Địa chỉ | 9 | 9 | 0 |
+| G. Giỏ hàng | 11 | 11 | 0 |
+| H. Đơn hàng | 37 | 37 | 0 |
+| I. Thanh toán VNPAY | 15 | 15 | 0 |
+| J. Đánh giá | 13 | 13 | 0 |
+| K. Kho | 13 | 13 | 0 |
 | L. Dashboard | 3 | 3 | 0 |
-| M. Xóa dữ liệu | 5 | 4 | 1 |
+| M. Xóa dữ liệu | 7 | 7 | 0 |
 
 Các chức năng đã kiểm chứng hoạt động đúng:
 
 - Đăng ký, chặn trùng email, chặn mật khẩu ngắn, kích hoạt bằng mã, đăng nhập, chặn đăng nhập khi chưa kích hoạt hoặc sai mật khẩu, hồ sơ.
-- Phân quyền: chưa đăng nhập hoặc token rác trả 401; USER gọi API quản trị trả 403; ADMIN gọi được.
-- Quản trị người dùng: tạo, sửa, đổi vai trò, chặn vai trò sai (400), vô hiệu hóa, 404 khi không tồn tại.
-- Danh mục, loại danh mục, sản phẩm kèm biến thể: tạo, xem, sửa; lọc theo danh mục và slug; tìm kiếm có phân trang.
-- Ảnh sản phẩm: tải lên, liệt kê, đặt ảnh chính, xóa.
-- Địa chỉ: thêm, sửa, xóa, chỉ chủ sở hữu được sửa hoặc xóa (người khác nhận 403).
-- Giỏ hàng: thêm, xem, sửa, xóa.
-- Đơn hàng: tạo, xem đơn của tôi, chi tiết, danh sách chưa đánh giá; ADMIN xem tất cả; luồng `PENDING → SHIPPING → WAIT_DELIVER → PAID`; chặn chuyển sai luồng và chặn chuyển tiếp từ trạng thái cuối; ghi đủ lịch sử trạng thái.
-- VNPAY: tạo URL thanh toán, xử lý callback và đặt trạng thái thanh toán.
-- Đánh giá: tạo, xem, sửa, xóa; điểm trung bình sản phẩm cập nhật đúng.
-- Phiếu nhập kho: tạo (không dòng chi tiết), xem, xóa. Dashboard và Swagger hoạt động.
+- Phân quyền: chưa đăng nhập hoặc token rác trả 401; USER gọi API quản trị trả 403; ADMIN gọi được; mỗi người chỉ truy cập được giỏ hàng, địa chỉ, đơn hàng, đánh giá của chính mình.
+- Quản trị người dùng, danh mục, loại danh mục, sản phẩm kèm biến thể, ảnh sản phẩm, biến thể riêng lẻ.
+- Tìm kiếm có phân trang, lọc, và tìm không phân biệt dấu tiếng Việt.
+- Giỏ hàng có kiểm tra tồn kho; đơn hàng tính giá phía máy chủ, trừ kho, từ chối khi hết hàng, hủy đơn cộng trả đúng số lượng, xóa đơn an toàn.
+- Luồng trạng thái đơn, chặn chuyển sai luồng, ghi lịch sử với người thực hiện lấy từ token.
+- VNPAY: URL có chữ ký, callback hợp lệ cập nhật đơn; callback giả mạo, sai số tiền, thiếu tham số không làm đổi dữ liệu.
+- Đánh giá: tạo, sửa, xóa, chặn đánh giá sai quyền hoặc lặp, cập nhật điểm trung bình, không lộ email và số điện thoại.
+- Phiếu nhập kho: tạo kèm dòng chi tiết, duyệt phiếu cộng tồn kho và ghi sổ biến động, chặn sửa hoặc xóa phiếu đã duyệt.
+- Dashboard, Swagger, định dạng lỗi thống nhất.
 
-### 14.2. Các điểm chưa đúng phát hiện được
+### 14.2. Các điểm đã khắc phục sau lần kiểm thử đầu
 
-Mức độ: Cao ảnh hưởng tiền, dữ liệu hoặc quyền; Trung bình là chức năng hỏng hoặc lỗi trả sai mã; Thấp là điểm cần cải thiện.
+Lần kiểm thử đầu (122 kiểm tra) phát hiện 12 vấn đề; tất cả đã được sửa và kiểm chứng lại.
 
-| Mã | Mức | Vấn đề | Bằng chứng (mã kiểm tra) | Đề xuất |
-| --- | --- | --- | --- | --- |
-| F-01 | Cao | Tạo đơn không trừ tồn kho; hủy đơn lại cộng trả kho nên tồn kho tăng sai (tồn 5 thành 8 sau khi tạo và hủy đơn 3 sản phẩm). | H2, H21 | Trừ kho trong một giao dịch khi tạo đơn, ghi `stock_movements`. |
-| F-02 | Cao | Callback VNPAY không kiểm tra chữ ký: gọi giả mạo vẫn chuyển hướng `status=success` và đặt đơn đã thanh toán. | I5 | Kiểm tra `vnp_SecureHash` và số tiền, thêm IPN. |
-| F-03 | Cao | Mọi người dùng đăng nhập đổi được trạng thái thanh toán của đơn bất kỳ thành PAID. | H19 | Giới hạn cho ADMIN hoặc chỉ cho hệ thống VNPAY. |
-| F-04 | Cao | Người dùng xem được đơn của người khác (200); lệnh xóa đơn của người khác không bị chặn quyền. | H9, H24 | Kiểm tra chủ đơn (lấy người dùng từ token). |
-| F-05 | Trung bình | API công khai `GET /api/reviews/product/<built-in function id>` trả email và số điện thoại người đánh giá. | J2b | Chỉ trả tên hiển thị. |
-| F-06 | Trung bình | Không tạo được biến thể riêng lẻ: `POST /api/product-variants` luôn lỗi 500 vì `product` không đọc được từ JSON (PUT, DELETE của biến thể mới tạo vì thế cũng không kiểm thử được). | E20, E21, E22 | Dùng request riêng có `productId`. |
-| F-07 | Trung bình | Phiếu nhập kho: không tạo được dòng chi tiết (500); PUT bắt buộc gửi `receiptDate` (500 nếu thiếu); duyệt phiếu không cộng tồn kho. | K2, K5, K6 | Dùng DTO riêng, cộng kho khi `APPROVED`. |
-| F-08 | Trung bình | Lỗi nghiệp vụ trả 500 thay vì 4xx: trùng `orderNumber`, đánh giá sai quyền, `rating` ngoài 1 đến 5, xóa loại danh mục còn sản phẩm, xóa đơn đã có lịch sử trạng thái. | H18, J6, J7, M3, H24 | Thêm validation và ngoại lệ riêng (400, 403, 409). |
-| F-09 | Thấp | Giỏ hàng không kiểm tra số lượng so với tồn kho (thêm 9999 vẫn được). | G5 | Kiểm tra tồn kho khi thêm giỏ. |
-| F-10 | Thấp | `GET /api/orders/me`, `/{id}`, `/` không trả `paymentStatus`; chỉ POST và PATCH mới có. | H3, H4 | Thêm `paymentStatus` vào `OrderResponse`. |
-| F-11 | Thấp | Tìm kiếm theo `keyword` phân biệt dấu: `ao` không khớp `Áo`. | A3 | Chuẩn hóa không dấu khi tìm. |
-| F-12 | Thấp | `PUT /api/products/{id}` ghi đè toàn bộ; trường thiếu thành `null` (suy ra từ mã nguồn, ví dụ `rating`). | E12 | Chỉ cập nhật trường được gửi. |
+| Mã | Mức | Vấn đề ban đầu | Cách khắc phục |
+| --- | --- | --- | --- |
+| F-01 | Cao | Tạo đơn không trừ kho, hủy đơn cộng kho làm tồn tăng sai | Trừ kho trong giao dịch khi tạo đơn (khóa dòng biến thể, ghi sổ biến động); hết hàng trả 409; hủy hoặc hoàn trả cộng đúng số đã trừ |
+| F-02 | Cao | Callback VNPAY không kiểm tra chữ ký | Kiểm tra `vnp_SecureHash`, đối chiếu số tiền; không hợp lệ thì không đổi dữ liệu; số tiền tạo URL lấy từ đơn |
+| F-03 | Cao | Mọi user đổi được trạng thái thanh toán | Chỉ Admin được gọi `payment-status` |
+| F-04 | Cao | Xem và xóa đơn của người khác; xóa đơn có lịch sử lỗi 500 | Xem đơn chỉ chủ đơn hoặc Admin; xóa chỉ Admin, chỉ đơn đã hủy hoặc hoàn trả, xóa kèm lịch sử |
+| F-05 | Trung bình | API công khai lộ email và số điện thoại người đánh giá | `user` chỉ còn `id`, `firstName`, `lastName`, `avatar` |
+| F-06 | Trung bình | Không tạo được biến thể riêng lẻ | `POST /api/product-variants` dùng request có `productId`; trả DTO gọn |
+| F-07 | Trung bình | Phiếu nhập: không tạo được dòng chi tiết, PUT bắt buộc `receiptDate`, không cộng kho | Request riêng có `items`; máy chủ tính tiền và ngày; duyệt phiếu cộng kho; trạng thái cuối bất biến |
+| F-08 | Trung bình | Lỗi nghiệp vụ trả 500 | Thêm 409 (trùng, hết hàng, đang được tham chiếu), 403 (sai quyền), 400 (kiểm tra đầu vào) |
+| F-09 | Thấp | Giỏ hàng không kiểm tra tồn kho | Số lượng vượt tồn kho trả 400; thêm lại cùng biến thể thì cộng dồn |
+| F-10 | Thấp | `OrderResponse` không có `paymentStatus` | Đã thêm |
+| F-11 | Thấp | Tìm kiếm phân biệt dấu | Dùng `unaccent` của PostgreSQL (migration V3) |
+| F-12 | Thấp | `PUT /api/products/{id}` ghi đè trường thiếu thành `null` | Cập nhật một phần; `rating`, biến thể, ảnh không bị ảnh hưởng |
 
-Đã sửa trong lúc kiểm thử: phản hồi 401 và 403 trước đây trả `timestamp` dạng mảng số `[2026,10,13,...]`; nay trả chuỗi ISO giống các lỗi khác (`WebSecurityConfig`).
+Khắc phục thêm cùng đợt: `userId` không còn do client gửi (đơn, giỏ, đánh giá lấy từ token); chỉ chủ sở hữu hoặc Admin truy cập giỏ hàng, địa chỉ; sửa đánh giá của người khác bị chặn (trước đây không kiểm tra); đánh giá chỉ khi đơn hoàn thành và mỗi dòng đơn một đánh giá; không xóa được sản phẩm hoặc biến thể đã phát sinh đơn hàng.
+
+Lưu ý khi chạy kiểm thử: kết nối tới Neon thỉnh thoảng báo lỗi I/O chập chờn (ví dụ `An I/O error occurred while sending to the backend`); chạy lại sẽ đạt.
 
 ### 14.3. Cách chạy lại bộ kiểm thử
 
@@ -734,4 +796,3 @@ Mức độ: Cao ảnh hưởng tiền, dữ liệu hoặc quyền; Trung bình 
 ```
 
 Cần file `.env` (kết nối cơ sở dữ liệu và `JWT_KEY`). Kết quả từng lời gọi (request, response, mã trả về) được ghi vào `target/api-results.json`. Bộ test không chạy trong `./mvnw test` mặc định vì tên kết thúc bằng `IT`.
-

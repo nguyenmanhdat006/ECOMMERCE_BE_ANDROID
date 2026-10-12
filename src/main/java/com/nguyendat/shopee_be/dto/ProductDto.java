@@ -20,7 +20,8 @@ public class ProductDto {
     private String description;
     private BigDecimal price;
     private String brand;
-    private boolean isNewArrival;
+    // JSON: newArrival; null khi sửa nghĩa là giữ nguyên giá trị hiện tại
+    private Boolean newArrival;
     private Float rating;
     private UUID categoryId;
     private String thumbnail;

@@ -21,15 +21,27 @@ public class ProductSpecification {
             if(keyword == null || keyword.trim().isEmpty()){
                 return criteriaBuilder.conjunction();
             }
-            String likePattern = "%" + keyword.toLowerCase() + "%";
+            // Tìm không phân biệt hoa thường và dấu tiếng Việt: từ khóa bỏ dấu ở Java, cột bỏ dấu bằng unaccent() của PostgreSQL (migration V3)
+            String likePattern = "%" + foldAccents(keyword) + "%";
             return criteriaBuilder.or(
-                criteriaBuilder.like(criteriaBuilder.lower(root.get("name")), likePattern),
-                criteriaBuilder.like(criteriaBuilder.lower(root.get("description")), likePattern),
-                criteriaBuilder.like(criteriaBuilder.lower(root.get("brand")), likePattern)
+                criteriaBuilder.like(unaccentLower(criteriaBuilder, root.get("name")), likePattern),
+                criteriaBuilder.like(unaccentLower(criteriaBuilder, root.get("description")), likePattern),
+                criteriaBuilder.like(unaccentLower(criteriaBuilder, root.get("brand")), likePattern)
             );
         };
     }
     
+    private static jakarta.persistence.criteria.Expression<String> unaccentLower(
+            jakarta.persistence.criteria.CriteriaBuilder cb, jakarta.persistence.criteria.Expression<String> column) {
+        return cb.function("unaccent", String.class, cb.lower(column));
+    }
+
+    static String foldAccents(String text) {
+        String normalized = java.text.Normalizer.normalize(text.trim(), java.text.Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "");
+        return normalized.replace('đ', 'd').replace('Đ', 'D').toLowerCase();
+    }
+
     public static Specification<Product> hasBrand(String brand){
         return (root, query, criteriaBuilder) -> {
             if(brand == null || brand.trim().isEmpty()){

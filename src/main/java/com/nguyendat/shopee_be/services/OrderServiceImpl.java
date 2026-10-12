@@ -1,37 +1,44 @@
 package com.nguyendat.shopee_be.services;
 
-import com.nguyendat.shopee_be.repositories.UserDetailRepository;
+import com.nguyendat.shopee_be.dto.OrderItemRequest;
 import com.nguyendat.shopee_be.dto.OrderRequest;
-import com.nguyendat.shopee_be.entities.*;
-import com.nguyendat.shopee_be.exceptions.ResourceNotFoundEx;
-import com.nguyendat.shopee_be.repositories.*;
+import com.nguyendat.shopee_be.entities.Order;
+import com.nguyendat.shopee_be.entities.OrderItem;
+import com.nguyendat.shopee_be.entities.OrderStatus;
+import com.nguyendat.shopee_be.entities.OrderStatusHistory;
+import com.nguyendat.shopee_be.entities.PaymentStatus;
+import com.nguyendat.shopee_be.entities.Product;
+import com.nguyendat.shopee_be.entities.ProductVariant;
 import com.nguyendat.shopee_be.entities.User;
-
-import java.util.Optional;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Service;
-import org.springframework.beans.factory.annotation.Value;
-
-import com.fasterxml.jackson.databind.ObjectMapper;
-import java.math.BigDecimal;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
-import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
-import java.util.stream.Collectors;
-
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
-
+import com.nguyendat.shopee_be.exceptions.ConflictException;
+import com.nguyendat.shopee_be.exceptions.ResourceNotFoundEx;
+import com.nguyendat.shopee_be.repositories.OrderItemRepository;
+import com.nguyendat.shopee_be.repositories.OrderRepository;
+import com.nguyendat.shopee_be.repositories.OrderStatusHistoryRepository;
+import com.nguyendat.shopee_be.ultil.AccessUtil;
+import com.nguyendat.shopee_be.ultil.VnpayUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.UUID;
 
 @Service
 public class OrderServiceImpl implements OrderService {
+
+    private static final Logger log = LoggerFactory.getLogger(OrderServiceImpl.class);
+    private static final Set<String> PAYMENT_METHODS = Set.of("COD", "VNPAY");
 
     @Value("${VNPAY_URL:https://sandbox.vnpayment.vn/paymentv2/vpcpay.html}")
     private String vnpUrl;
@@ -49,27 +56,16 @@ public class OrderServiceImpl implements OrderService {
     private OrderRepository orderRepository;
 
     @Autowired
-    private UserDetailRepository userRepository;
-
-    @Autowired
-    private ProductRepository productRepository;
-
-    @Autowired
-    private ProductVariantRepository productVariantRepository;
-
-    @Autowired
     private OrderItemRepository orderItemRepository;
 
     @Autowired
     private OrderStatusHistoryRepository statusHistoryRepository;
 
     @Autowired
-    private DashboardService dashboardService; 
+    private DashboardService dashboardService;
 
     @Autowired
-    private ObjectMapper objectMapper;
-
-    private static final Logger log = LoggerFactory.getLogger(OrderServiceImpl.class);
+    private StockService stockService;
 
     @Override
     public List<Order> findAll() {
@@ -82,81 +78,116 @@ public class OrderServiceImpl implements OrderService {
                 .orElseThrow(() -> new ResourceNotFoundEx("Order not found with id: " + id));
     }
 
+    /**
+     * Tạo đơn: người đặt lấy từ token; giá và tổng tiền do máy chủ tính từ giá sản phẩm;
+     * tồn kho bị trừ ngay trong cùng giao dịch (không đủ hàng thì cả đơn bị từ chối, 409).
+     */
     @Override
-    public Order create(OrderRequest request) {
-        log.info("🔥🔥🔥 ============ CREATE METHOD CALLED ============");
-        log.info("🔥🔥🔥 Customer ID: " + request.getCustomerId());
-        User customer = userRepository.findById(request.getCustomerId())
-                .orElseThrow(() -> new ResourceNotFoundEx("User not found with id: " + request.getCustomerId()));
-
-        Order order = new Order();
-        order.setOrderNumber(request.getOrderNumber());
-        order.setOrderDate(new Date());
-        order.setTotalAmount(request.getTotalAmount());
-        order.setStatus(OrderStatus.valueOf(request.getStatus()));
-        order.setPaymentMethod(request.getPaymentMethod());
-        order.setShippingAddress(request.getShippingAddress());
-        order.setNotes(request.getNotes());
-        order.setCustomer(customer);
-
-        Order savedOrder = orderRepository.save(order);
-
-        List<OrderItem> orderItems = request.getOrderItems().stream().map(itemReq -> {
-            OrderItem item = new OrderItem();
-            item.setOrder(savedOrder);
-            item.setQuantity(itemReq.getQuantity());
-            item.setUnitPrice(itemReq.getUnitPrice());
-            item.setTotalPrice(itemReq.getTotalPrice());
-
-            Product product = productRepository.findById(itemReq.getProductId())
-                    .orElseThrow(() -> new ResourceNotFoundEx("Product not found with id: " + itemReq.getProductId()));
-
-            ProductVariant variant = productVariantRepository.findById(itemReq.getProductVariantId())
-                    .orElseThrow(() -> new ResourceNotFoundEx("Product variant not found with id: " + itemReq.getProductVariantId()));
-
-            item.setProduct(product);
-            item.setProductVariant(variant);
-
-            return orderItemRepository.save(item);
-        }).collect(Collectors.toList());
-
-        savedOrder.setOrderItems(orderItems);
-        log.info("🔥 INFO: Order created with ID: " + savedOrder.getId());
-
-        Order finalOrder = orderRepository.save(savedOrder);
-        log.info("🔥 DEBUG: Order created with ID: " + finalOrder.getId());
-        log.info("🔥 DEBUG: Total amount: " + finalOrder.getTotalAmount());
-
-        // GỬI DASHBOARD EVENT: NEW_ORDER
-        try {
-            // Lấy tên khách hàng: firstName + lastName, hoặc email nếu null
-            String customerName = buildCustomerName(customer);
-            
-            dashboardService.pushNewOrderEvent(
-                finalOrder.getId().toString(),
-                customerName,
-                finalOrder.getTotalAmount().doubleValue()
-            );
-        } catch (Exception e) {
-            System.err.println("❌ Failed to push dashboard NEW_ORDER event: " + e.getMessage());
+    @Transactional
+    public Order create(OrderRequest request, User customer) {
+        if (request.getOrderItems() == null || request.getOrderItems().isEmpty()) {
+            throw new IllegalArgumentException("Đơn hàng phải có ít nhất một sản phẩm");
+        }
+        if (request.getShippingAddress() == null || request.getShippingAddress().isBlank()) {
+            throw new IllegalArgumentException("Địa chỉ giao hàng là bắt buộc");
+        }
+        String paymentMethod = request.getPaymentMethod() == null || request.getPaymentMethod().isBlank()
+                ? "COD" : request.getPaymentMethod().trim().toUpperCase();
+        if (!PAYMENT_METHODS.contains(paymentMethod)) {
+            throw new IllegalArgumentException("Phương thức thanh toán không hợp lệ: " + request.getPaymentMethod() + " (chỉ COD hoặc VNPAY)");
         }
 
+        String orderNumber = request.getOrderNumber() == null || request.getOrderNumber().isBlank()
+                ? "SE-" + new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()) + "-" + UUID.randomUUID().toString().substring(0, 4).toUpperCase()
+                : request.getOrderNumber().trim();
+        if (orderRepository.existsByOrderNumber(orderNumber)) {
+            throw new ConflictException("Mã đơn hàng đã tồn tại: " + orderNumber);
+        }
+
+        Order order = new Order();
+        order.setOrderNumber(orderNumber);
+        order.setOrderDate(new Date());
+        order.setTotalAmount(BigDecimal.ZERO);
+        order.setStatus(OrderStatus.PENDING);
+        order.setPaymentMethod(paymentMethod);
+        order.setShippingAddress(request.getShippingAddress().trim());
+        order.setNotes(request.getNotes());
+        order.setCustomer(customer);
+        Order saved = orderRepository.save(order);
+
+        BigDecimal total = BigDecimal.ZERO;
+        List<OrderItem> items = new ArrayList<>();
+        for (OrderItemRequest itemReq : request.getOrderItems()) {
+            if (itemReq.getQuantity() == null || itemReq.getQuantity() <= 0) {
+                throw new IllegalArgumentException("Số lượng phải lớn hơn 0");
+            }
+            if (itemReq.getProductVariantId() == null) {
+                throw new IllegalArgumentException("productVariantId là bắt buộc");
+            }
+            ProductVariant variant = stockService.lock(itemReq.getProductVariantId());
+            Product product = variant.getProduct();
+            if (itemReq.getProductId() != null && !itemReq.getProductId().equals(product.getId())) {
+                throw new IllegalArgumentException("Biến thể " + variant.getId() + " không thuộc sản phẩm " + itemReq.getProductId());
+            }
+
+            BigDecimal unitPrice = product.getPrice();
+            BigDecimal lineTotal = unitPrice.multiply(BigDecimal.valueOf(itemReq.getQuantity()));
+            total = total.add(lineTotal);
+
+            OrderItem item = new OrderItem();
+            item.setOrder(saved);
+            item.setProduct(product);
+            item.setProductVariant(variant);
+            item.setQuantity(itemReq.getQuantity());
+            item.setUnitPrice(unitPrice);
+            item.setTotalPrice(lineTotal);
+            items.add(orderItemRepository.save(item));
+
+            stockService.remove(variant, itemReq.getQuantity(), saved.getId(), "ORDER", "Trừ kho khi đặt đơn " + orderNumber);
+        }
+
+        saved.setOrderItems(items);
+        saved.setTotalAmount(total);
+        Order finalOrder = orderRepository.save(saved);
+
+        try {
+            dashboardService.pushNewOrderEvent(finalOrder.getId().toString(), buildCustomerName(customer), total.doubleValue());
+        } catch (Exception e) {
+            log.warn("Không đẩy được sự kiện NEW_ORDER lên dashboard: {}", e.getMessage());
+        }
         return finalOrder;
     }
 
+    /** Chỉ xóa được đơn đã hủy hoặc đã hoàn trả (kho đã được cộng trả); xóa kèm lịch sử trạng thái. */
     @Override
+    @Transactional
     public void deleteById(UUID id) {
-        orderRepository.deleteById(id);
+        Order order = findById(id);
+        if (order.getStatus() != OrderStatus.CANCELED && order.getStatus() != OrderStatus.REFUND) {
+            throw new IllegalArgumentException("Chỉ xóa được đơn đã hủy hoặc đã hoàn trả");
+        }
+        statusHistoryRepository.deleteByOrder_Id(id);
+        orderRepository.delete(order);
     }
 
     @Override
-    public String createVnpayUrl(UUID orderId, BigDecimal amount) {
-        Order order = orderRepository.findById(orderId)
-            .orElseThrow(() -> new ResourceNotFoundEx("Order not found"));
+    public String createVnpayUrl(UUID orderId, User requester) {
+        if (vnpTmnCode == null || vnpTmnCode.isBlank() || vnpHashSecret == null || vnpHashSecret.isBlank()) {
+            throw new IllegalStateException("Chưa cấu hình VNPAY_TMN_CODE và VNPAY_HASH_SECRET");
+        }
+        Order order = findById(orderId);
+        AccessUtil.requireOwnerOrAdmin(requester, order.getCustomer().getId());
+        if (order.getPaymentStatus() == PaymentStatus.PAID) {
+            throw new ConflictException("Đơn hàng đã được thanh toán");
+        }
+        if (order.getStatus() == OrderStatus.CANCELED || order.getStatus() == OrderStatus.REFUND) {
+            throw new IllegalArgumentException("Không thanh toán được đơn đã hủy hoặc đã hoàn trả");
+        }
 
-        String vnp_ReturnUrl = vnpReturnUrlBase + "/vnpay-done/" + orderId;
+        // Số tiền lấy từ đơn hàng, không tin số tiền do client gửi
+        BigDecimal amount = order.getTotalAmount();
 
-        Map<String, String> vnpParams = new HashMap<>();
+        Map<String, String> vnpParams = new TreeMap<>();
         vnpParams.put("vnp_Version", "2.1.0");
         vnpParams.put("vnp_Command", "pay");
         vnpParams.put("vnp_TmnCode", vnpTmnCode);
@@ -167,91 +198,80 @@ public class OrderServiceImpl implements OrderService {
         vnpParams.put("vnp_OrderInfo", "Thanh toan don hang " + orderId);
         vnpParams.put("vnp_OrderType", "other");
         vnpParams.put("vnp_Locale", "vn");
-        vnpParams.put("vnp_ReturnUrl", vnp_ReturnUrl);
+        vnpParams.put("vnp_ReturnUrl", vnpReturnUrlBase + "/vnpay-done/" + orderId);
         vnpParams.put("vnp_IpAddr", "127.0.0.1");
 
+        String query = VnpayUtil.buildQuery(vnpParams);
+        String secureHash = VnpayUtil.hmacSHA512(vnpHashSecret, query);
+        return vnpUrl + "?" + query + "&vnp_SecureHash=" + secureHash;
+    }
+
+    /**
+     * Xử lý kết quả VNPAY trả về. Chỉ cập nhật đơn khi chữ ký hợp lệ và số tiền khớp với đơn;
+     * mọi trường hợp khác trả false và không thay đổi dữ liệu.
+     */
+    @Override
+    @Transactional
+    public boolean processVnpayReturned(Map<String, String> params) {
+        if (!VnpayUtil.verify(params, vnpHashSecret)) {
+            log.warn("Callback VNPAY sai chữ ký hoặc thiếu chữ ký, bỏ qua (vnp_TxnRef={})", params.get("vnp_TxnRef"));
+            return false;
+        }
+
+        Order order;
         try {
-            String query = vnpParams.entrySet().stream()
-                .sorted(Map.Entry.comparingByKey())
-                .filter(e -> e.getValue() != null && !e.getValue().isEmpty())
-                .map(e -> e.getKey() + "=" + URLEncoder.encode(e.getValue(), StandardCharsets.UTF_8))
-                .collect(Collectors.joining("&"));
-
-            Mac hmacSHA512 = Mac.getInstance("HmacSHA512");
-            SecretKeySpec secretKeySpec = new SecretKeySpec(vnpHashSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA512");
-            hmacSHA512.init(secretKeySpec);
-            byte[] hashBytes = hmacSHA512.doFinal(query.getBytes(StandardCharsets.UTF_8));
-
-            StringBuilder hexHash = new StringBuilder();
-            for (byte b : hashBytes) {
-                hexHash.append(String.format("%02x", b & 0xff));
-            }
-            String secureHash = hexHash.toString();
-
-            return vnpUrl + "?" + query + "&vnp_SecureHash=" + secureHash;
-
+            order = orderRepository.findById(UUID.fromString(params.get("vnp_TxnRef"))).orElse(null);
         } catch (Exception e) {
-            throw new RuntimeException("Error generating VNPAY secure hash", e);
+            return false;
         }
+        if (order == null) {
+            return false;
+        }
+
+        try {
+            BigDecimal expected = order.getTotalAmount().multiply(BigDecimal.valueOf(100));
+            if (new BigDecimal(params.get("vnp_Amount")).compareTo(expected) != 0) {
+                log.warn("Callback VNPAY sai số tiền cho đơn {}: nhận {}, cần {}", order.getId(), params.get("vnp_Amount"), expected);
+                return false;
+            }
+        } catch (Exception e) {
+            return false;
+        }
+
+        boolean success = "00".equals(params.get("vnp_ResponseCode"));
+        if (order.getPaymentStatus() == PaymentStatus.PAID) {
+            return success; // đã ghi nhận trước đó, không đổi trạng thái
+        }
+
+        order.setPaymentStatus(success ? PaymentStatus.PAID : PaymentStatus.FAILED);
+        order.setUpdatedAt(new Date());
+        orderRepository.save(order);
+
+        if (success && order.getStatus() == OrderStatus.PAID) {
+            pushRevenueQuietly();
+        }
+        return success;
     }
 
     @Override
-    public boolean processVnpayReturned(Map<String,String> params) {
-        String orderId = params.get("vnp_TxnRef");
-        String rspCode = params.get("vnp_ResponseCode");
-        Optional<Order> orderOpt = orderRepository.findById(UUID.fromString(orderId));
-        
-        if(orderOpt.isPresent()) {
-            Order order = orderOpt.get();
-            PaymentStatus oldPaymentStatus = order.getPaymentStatus();
-            
-            if ("00".equals(rspCode)) {
-                order.setPaymentStatus(PaymentStatus.PAID); 
-            } else {
-                order.setPaymentStatus(PaymentStatus.FAILED);
-            }
-            orderRepository.save(order);
-
-            // GỬI DASHBOARD EVENT: PAYMENT STATUS CHANGED
-            try {
-                if ("00".equals(rspCode) && order.getStatus() == OrderStatus.PAID) {
-                    // Nếu thanh toán thành công và đơn đã PAID → update revenue
-                    dashboardService.pushRevenueUpdate();
-                }
-            } catch (Exception e) {
-                System.err.println("❌ Failed to push dashboard PAYMENT event: " + e.getMessage());
-            }
-
-            return "00".equals(rspCode);
-        }
-        return false;
-    }
-
-    @Override
+    @Transactional
     public Order updateStatus(UUID orderId, OrderStatus newStatus, String changedBy) {
-        // 1️⃣ Lấy đơn hàng
-        Order order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new ResourceNotFoundEx("Order not found"));
-
+        Order order = findById(orderId);
         OrderStatus oldStatus = order.getStatus();
 
-        // 2️⃣ Kiểm tra chuyển trạng thái hợp lệ
         if (!isValidTransition(oldStatus, newStatus)) {
-            throw new IllegalArgumentException(
-                    "Không thể chuyển từ trạng thái " + oldStatus + " sang " + newStatus
-            );
+            throw new IllegalArgumentException("Không thể chuyển từ trạng thái " + oldStatus + " sang " + newStatus);
         }
 
-        // 3️⃣ Nếu hủy hoặc hoàn trả → trả kho
+        // Hủy hoặc hoàn trả: cộng trả kho (kho đã bị trừ lúc đặt đơn)
         if (newStatus == OrderStatus.CANCELED || newStatus == OrderStatus.REFUND) {
             for (OrderItem item : order.getOrderItems()) {
-                ProductVariant variant = item.getProductVariant();
-                variant.setStockQuantity(variant.getStockQuantity() + item.getQuantity());
-                productVariantRepository.save(variant);
+                ProductVariant variant = stockService.lock(item.getProductVariant().getId());
+                stockService.add(variant, item.getQuantity(), order.getId(), "ORDER",
+                        "Cộng trả kho do đơn " + order.getOrderNumber() + " chuyển sang " + newStatus);
             }
         }
 
-        // 4️⃣ Lưu lịch sử trạng thái
         OrderStatusHistory history = new OrderStatusHistory();
         history.setOrder(order);
         history.setOldStatus(oldStatus);
@@ -259,62 +279,52 @@ public class OrderServiceImpl implements OrderService {
         history.setChangedBy(changedBy);
         statusHistoryRepository.save(history);
 
-        // 5️⃣ Cập nhật trạng thái đơn hàng
         order.setStatus(newStatus);
         order.setUpdatedAt(new Date());
         Order savedOrder = orderRepository.save(order);
 
-        // 7️⃣  GỬI DASHBOARD EVENT: ORDER_STATUS_CHANGED
         try {
-            dashboardService.pushOrderStatusChanged(
-                orderId.toString(),
-                oldStatus.name(),
-                newStatus.name()
-            );
-
-            // Nếu đơn chuyển sang PAID (hoàn thành) → update revenue
+            dashboardService.pushOrderStatusChanged(orderId.toString(), oldStatus.name(), newStatus.name());
             if (newStatus == OrderStatus.PAID) {
                 dashboardService.pushRevenueUpdate();
             }
         } catch (Exception e) {
-            System.err.println("❌ Failed to push dashboard ORDER_STATUS_CHANGED event: " + e.getMessage());
+            log.warn("Không đẩy được sự kiện ORDER_STATUS_CHANGED lên dashboard: {}", e.getMessage());
         }
-
         return savedOrder;
     }
 
     @Override
+    @Transactional
     public Order updatePaymentStatus(UUID orderId, PaymentStatus newStatus, String changedBy) {
-        Order order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new ResourceNotFoundEx("Order not found"));
-
-        PaymentStatus oldPaymentStatus = order.getPaymentStatus();
+        Order order = findById(orderId);
         order.setPaymentStatus(newStatus);
         order.setUpdatedAt(new Date());
         Order saved = orderRepository.save(order);
 
-        //  GỬI DASHBOARD EVENT nếu thanh toán thành công
-        try {
-            if (newStatus == PaymentStatus.PAID && order.getStatus() == OrderStatus.PAID) {
-                // Chỉ update revenue khi cả payment status VÀ order status đều PAID
-                dashboardService.pushRevenueUpdate();
-            }
-        } catch (Exception e) {
-            System.err.println("❌ Failed to push dashboard PAYMENT event: " + e.getMessage());
+        if (newStatus == PaymentStatus.PAID && order.getStatus() == OrderStatus.PAID) {
+            pushRevenueQuietly();
         }
-
         return saved;
     }
 
     @Override
-    public List<Order> findByUser(com.nguyendat.shopee_be.entities.User user) {
+    public List<Order> findByUser(User user) {
         return orderRepository.findByCustomer(user);
     }
 
     @Override
-    public List<OrderItem> findUnreviewedOrderItemsByUser(com.nguyendat.shopee_be.entities.User user) {
+    public List<OrderItem> findUnreviewedOrderItemsByUser(User user) {
         if (user == null || user.getId() == null) return java.util.Collections.emptyList();
         return orderItemRepository.findUnreviewedByCustomerId(user.getId());
+    }
+
+    private void pushRevenueQuietly() {
+        try {
+            dashboardService.pushRevenueUpdate();
+        } catch (Exception e) {
+            log.warn("Không đẩy được sự kiện doanh thu lên dashboard: {}", e.getMessage());
+        }
     }
 
     private boolean isValidTransition(OrderStatus current, OrderStatus next) {
@@ -334,8 +344,7 @@ public class OrderServiceImpl implements OrderService {
             return customer.getFirstName();
         } else if (customer.getLastName() != null) {
             return customer.getLastName();
-        } else {
-            return customer.getEmail();
         }
+        return customer.getEmail();
     }
 }

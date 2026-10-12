@@ -29,20 +29,19 @@ public class ProductMapper {
         product.setName(productDto.getName());
         product.setDescription(productDto.getDescription());
         product.setBrand(productDto.getBrand());
-        product.setNewArrival(productDto.isNewArrival());
+        product.setNewArrival(Boolean.TRUE.equals(productDto.getNewArrival()));
         product.setPrice(productDto.getPrice());
-        product.setRating(productDto.getRating());
         product.setSlug(productDto.getSlug());
 
         if(productDto.getCategoryId() != null){
             Category category = categoryRepository.findById(productDto.getCategoryId())
-                    .orElseThrow(() -> new RuntimeException("Category not found with id: " + productDto.getCategoryId()));
+                    .orElseThrow(() -> new com.nguyendat.shopee_be.exceptions.ResourceNotFoundEx("Category not found with id: " + productDto.getCategoryId()));
             product.setCategory(category);
         }
 
         if(productDto.getCategoryTypeId() != null){
             CategoryType categoryType = categoryTypeRepository.findById(productDto.getCategoryTypeId())
-                    .orElseThrow(() -> new RuntimeException("CategoryType not found with id: " + productDto.getCategoryTypeId()));
+                    .orElseThrow(() -> new com.nguyendat.shopee_be.exceptions.ResourceNotFoundEx("CategoryType not found with id: " + productDto.getCategoryTypeId()));
             product.setCategoryType(categoryType);
         }
 
@@ -102,7 +101,7 @@ public class ProductMapper {
                 .brand(product.getBrand())
                 .name(product.getName())
                 .price(product.getPrice())
-                .isNewArrival(product.isNewArrival())
+                .newArrival(product.isNewArrival())
                 .rating(product.getRating())
                 .description(product.getDescription())
                 .slug(product.getSlug())
@@ -123,6 +122,9 @@ public class ProductMapper {
     }
 
     public List<ProductVariantDto> mapProductVariantListToDto(List<ProductVariant> productVariants) {
+        if (productVariants == null) {
+            return List.of();
+        }
         return productVariants.stream().map(this::mapProductVariantDto).toList();
     }
 
@@ -136,6 +138,9 @@ public class ProductMapper {
     }
 
     public List<ProductResourceDto> mapProductResourcesListDto(List<Resources> resources) {
+        if (resources == null) {
+            return List.of();
+        }
         return resources.stream().map(this::mapResourceToDto).toList();
     }
 

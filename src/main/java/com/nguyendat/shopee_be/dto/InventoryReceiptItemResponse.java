@@ -14,9 +14,12 @@ import java.util.UUID;
 @Builder
 public class InventoryReceiptItemResponse {
     private UUID id;
+    private UUID productId;
+    private UUID productVariantId;
+    private String productName;
+    private String color;
+    private String size;
     private Integer quantity;
     private BigDecimal unitCost;
     private BigDecimal totalCost;
-    private UUID productId;
-    private UUID productVariantId;
 }

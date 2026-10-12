@@ -2,11 +2,16 @@ package com.nguyendat.shopee_be.controllers;
 
 import com.nguyendat.shopee_be.dto.ReviewRequest;
 import com.nguyendat.shopee_be.dto.ReviewResponse;
-import com.nguyendat.shopee_be.entities.Review;
+import com.nguyendat.shopee_be.dto.ReviewUpdateRequest;
+import com.nguyendat.shopee_be.entities.User;
 import com.nguyendat.shopee_be.services.ReviewService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -16,32 +21,26 @@ public class ReviewController {
 
     private final ReviewService reviewService;
 
+    // Người viết luôn là người đang đăng nhập
     @PostMapping
-    public Review createReview(@RequestBody ReviewRequest request) {
-        return reviewService.createReview(request.getUserId(), request);
+    @ResponseStatus(HttpStatus.CREATED)
+    public ReviewResponse createReview(@AuthenticationPrincipal User user, @Valid @RequestBody ReviewRequest request) {
+        return reviewService.createReview(user, request);
     }
 
-
     @GetMapping("/product/{productId}")
-    public java.util.List<ReviewResponse> getReviewsByProduct(@PathVariable("productId") UUID productId) {
+    public List<ReviewResponse> getReviewsByProduct(@PathVariable("productId") UUID productId) {
         return reviewService.getReviewsByProduct(productId);
     }
 
     @PutMapping("/{id}")
-    public Review updateReview(
-            @PathVariable("id") UUID id,
-            @RequestBody ReviewRequest request
-    ) {
-        // frontend provides userId in request
-        return reviewService.updateReview(request.getUserId(), id, request);
+    public ReviewResponse updateReview(@PathVariable("id") UUID id, @AuthenticationPrincipal User user,
+                                       @Valid @RequestBody ReviewUpdateRequest request) {
+        return reviewService.updateReview(user, id, request);
     }
 
     @DeleteMapping("/{id}")
-    public void deleteReview(
-            @PathVariable("id") UUID id,
-            @RequestParam("userId") UUID userId
-    ) {
-        // frontend provides userId as request parameter
-        reviewService.deleteReview(userId, id);
+    public void deleteReview(@PathVariable("id") UUID id, @AuthenticationPrincipal User user) {
+        reviewService.deleteReview(user, id);
     }
 }

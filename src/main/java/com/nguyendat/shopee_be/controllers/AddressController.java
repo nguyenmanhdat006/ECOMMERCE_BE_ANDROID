@@ -15,6 +15,7 @@ import java.util.Optional;
 import org.springframework.web.bind.annotation.*;
 
 import java.security.Principal;
+import com.nguyendat.shopee_be.ultil.AccessUtil;
 import java.util.List;
 import java.util.UUID;
 
@@ -49,8 +50,10 @@ public class AddressController {
 
     @GetMapping("/{id}")
     @Operation(summary = "Get address by id")
-    public ResponseEntity<Address> getById(@PathVariable UUID id) {
-        return new ResponseEntity<>(addressService.findById(id), HttpStatus.OK);
+    public ResponseEntity<Address> getById(@PathVariable UUID id, Principal principal) {
+        Address address = addressService.findById(id);
+        AccessUtil.requireOwnerOrAdmin(getCurrentUser(principal), address.getUser().getId());
+        return new ResponseEntity<>(address, HttpStatus.OK);
     }
 
     @PostMapping
@@ -95,7 +98,8 @@ public class AddressController {
 
     @GetMapping("/user/{userId}")
     @Operation(summary = "Get addresses by user id", description = "Returns all addresses belonging to the given user id")
-    public ResponseEntity<List<AddressResponse>> getByUserId(@PathVariable UUID userId) {
+    public ResponseEntity<List<AddressResponse>> getByUserId(@PathVariable UUID userId, Principal principal) {
+        AccessUtil.requireOwnerOrAdmin(getCurrentUser(principal), userId);
         Optional<User> userOpt = userDetailRepository.findById(userId);
         if (!userOpt.isPresent()) {
             return new ResponseEntity<>(HttpStatus.NOT_FOUND);

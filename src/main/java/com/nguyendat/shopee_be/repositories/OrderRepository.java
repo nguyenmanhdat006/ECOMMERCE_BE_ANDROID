@@ -13,6 +13,8 @@ import java.util.UUID;
 
 public interface OrderRepository extends JpaRepository<Order, UUID> {
     
+    boolean existsByOrderNumber(String orderNumber);
+
     // Đếm đơn theo status
     int countByStatus(OrderStatus status);
     

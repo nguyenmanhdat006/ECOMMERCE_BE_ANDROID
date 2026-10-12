@@ -18,6 +18,8 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 import org.springframework.web.server.ServerErrorException;
 import org.springframework.beans.factory.annotation.Value;
 import org.apache.coyote.BadRequestException;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.security.access.AccessDeniedException;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
@@ -251,6 +253,37 @@ public class GlobalExceptionHandler {
                 .build();
         
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse);
+    }
+
+    @ExceptionHandler(ConflictException.class)
+    public ResponseEntity<ErrorResponse> handleConflict(ConflictException ex, HttpServletRequest request) {
+        logger.warn("Conflict: {}", ex.getMessage());
+        return build(HttpStatus.CONFLICT, "Conflict", ex.getMessage(), request);
+    }
+
+    @ExceptionHandler({ForbiddenException.class, AccessDeniedException.class})
+    public ResponseEntity<ErrorResponse> handleForbidden(RuntimeException ex, HttpServletRequest request) {
+        logger.warn("Forbidden: {}", ex.getMessage());
+        String message = ex instanceof ForbiddenException ? ex.getMessage() : "You do not have permission to access this resource";
+        return build(HttpStatus.FORBIDDEN, "Forbidden", message, request);
+    }
+
+    // Vi phạm khóa ngoại / duy nhất của cơ sở dữ liệu (xóa dữ liệu đang được tham chiếu, trùng mã...)
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ErrorResponse> handleDataIntegrity(DataIntegrityViolationException ex, HttpServletRequest request) {
+        logger.warn("Data integrity violation: {}", ex.getMostSpecificCause().getMessage());
+        return build(HttpStatus.CONFLICT, "Conflict", "Dữ liệu đang được sử dụng hoặc bị trùng, không thể thực hiện thao tác", request);
+    }
+
+    private ResponseEntity<ErrorResponse> build(HttpStatus status, String error, String message, HttpServletRequest request) {
+        ErrorResponse body = ErrorResponse.builder()
+                .timestamp(LocalDateTime.now())
+                .status(status.value())
+                .error(error)
+                .message(message)
+                .path(request.getRequestURI())
+                .build();
+        return ResponseEntity.status(status).body(body);
     }
 
     @Value("${env:development}") // default là development nếu không có config
