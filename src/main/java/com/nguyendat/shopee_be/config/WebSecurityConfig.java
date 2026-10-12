@@ -1,6 +1,7 @@
 package com.nguyendat.shopee_be.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.nguyendat.shopee_be.entities.Role;
 import com.nguyendat.shopee_be.exceptions.ErrorResponse;
@@ -72,7 +73,8 @@ public class WebSecurityConfig {
 
     private final UserDetailsService userDetailsService;
     private final JWTTokenHelper jwtTokenHelper;
-    private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
+    private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule())
+            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
     @Value("${cors.allowed-origins:http://localhost:5173,http://localhost:3000,https://ecommerce-fe-pink-one.vercel.app}")
     private String corsAllowedOrigins; // comma separated
