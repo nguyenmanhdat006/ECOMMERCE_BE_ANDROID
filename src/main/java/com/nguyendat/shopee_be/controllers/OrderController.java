@@ -128,13 +128,6 @@ public class OrderController {
         return new ResponseEntity<>(created, HttpStatus.CREATED);
 }
 
-    @PutMapping("/{id}")
-    @Operation(summary = "Update order")
-    public ResponseEntity<Order> update(@PathVariable UUID id, @RequestBody OrderRequest request) {
-        Order updated = orderService.update(id, request);
-        return new ResponseEntity<>(updated, HttpStatus.OK);
-    }
-
     @DeleteMapping("/{id}")
     @Operation(summary = "Delete order")
     public ResponseEntity<Void> delete(@PathVariable UUID id) {

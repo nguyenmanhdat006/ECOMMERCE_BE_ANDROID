@@ -42,8 +42,7 @@ public class WebSecurityConfig {
             "/api/auth/**",
             "/api/health",
             "/v3/api-docs/**", "/swagger-ui.html", "/swagger-ui/**",
-            "/api/files/**", "/files/**",
-            "/api/upload/**", "/uploads/**",
+            "/uploads/**",
             "/api/vnpay/return",
             "/ws/**"
     };
@@ -60,9 +59,7 @@ public class WebSecurityConfig {
     private static final String[] ADMIN_APIS = {
             "/api/admin/**",
             "/api/dashboard/**",
-            "/api/inventory-receipts/**",
-            "/api/inventory-receipt-items/**",
-            "/api/stock-movements/**"
+            "/api/inventory-receipts/**"
     };
 
     // Endpoint catalog: ai cũng xem được, chỉ ADMIN được thêm/sửa/xoá
@@ -70,8 +67,7 @@ public class WebSecurityConfig {
             "/api/products/**",
             "/api/category/**",
             "/api/category-types/**",
-            "/api/product-variants/**",
-            "/api/product-statuses/**"
+            "/api/product-variants/**"
     };
 
     private final UserDetailsService userDetailsService;

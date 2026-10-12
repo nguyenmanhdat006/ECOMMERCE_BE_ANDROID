@@ -67,14 +67,6 @@ public class User implements UserDetails {
     @ToString.Exclude
     private List<Cart> carts;
 
-    @OneToMany(mappedBy = "customer", cascade = CascadeType.ALL)
-    @ToString.Exclude
-    private List<PurchaseHistory> purchaseHistories;
-
-    @OneToMany(mappedBy = "changedBy", cascade = CascadeType.ALL)
-    @ToString.Exclude
-    private List<ProductStatus> productStatusChanges;
-
     // Danh sách role gốc lưu trong DB
     @JsonIgnore
     public List<Authority> getRoles() {
