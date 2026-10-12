@@ -8,5 +8,7 @@ import java.util.UUID;
 
 @Repository
 public interface InventoryReceiptRepository extends JpaRepository<InventoryReceipt, UUID> {
+
+    boolean existsByReceiptNumber(String receiptNumber);
 }
 

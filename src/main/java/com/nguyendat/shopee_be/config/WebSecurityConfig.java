@@ -104,6 +104,9 @@ public class WebSecurityConfig {
                         .requestMatchers(HttpMethod.DELETE, ADMIN_WRITE_APIS).hasRole(Role.ADMIN)
                         .requestMatchers(HttpMethod.GET, "/api/orders").hasRole(Role.ADMIN)
                         .requestMatchers(HttpMethod.PATCH, "/api/orders/*/status").hasRole(Role.ADMIN)
+                        .requestMatchers(HttpMethod.PATCH, "/api/orders/*/payment-status").hasRole(Role.ADMIN)
+                        .requestMatchers(HttpMethod.DELETE, "/api/orders/*").hasRole(Role.ADMIN)
+                        .requestMatchers(HttpMethod.GET, "/api/carts", "/api/addresses").hasRole(Role.ADMIN)
                         .anyRequest().authenticated())
                 .exceptionHandling(exception -> exception
                         .authenticationEntryPoint((request, response, ex) -> writeError(request, response,

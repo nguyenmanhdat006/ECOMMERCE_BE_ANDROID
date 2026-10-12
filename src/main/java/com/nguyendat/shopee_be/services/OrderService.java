@@ -12,11 +12,11 @@ import java.util.UUID;
 public interface OrderService {
     List<Order> findAll();
     Order findById(UUID id);
-    Order create(OrderRequest request);
+    Order create(OrderRequest request, com.nguyendat.shopee_be.entities.User customer);
     void deleteById(UUID id);
 
     // Thanh toán VNPay
-    String createVnpayUrl(UUID orderId, BigDecimal amount);
+    String createVnpayUrl(UUID orderId, com.nguyendat.shopee_be.entities.User requester);
     boolean processVnpayReturned(Map<String, String> params);
 
     // Cập nhật trạng thái đơn hàng

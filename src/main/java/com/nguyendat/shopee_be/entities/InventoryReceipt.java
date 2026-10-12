@@ -41,7 +41,7 @@ public class InventoryReceipt {
     @Column(columnDefinition = "TEXT")
     private String notes;
     
-    @OneToMany(mappedBy = "inventoryReceipt", cascade = CascadeType.ALL)
+    @OneToMany(mappedBy = "inventoryReceipt", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<InventoryReceiptItem> inventoryReceiptItems;
     
     @PrePersist

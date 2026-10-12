@@ -18,5 +18,5 @@ public class ReviewResponse {
     private String comment;
     private Date createdAt;
     private Date updatedAt;
-    private UserDto user;
+    private ReviewerDto user;
 }

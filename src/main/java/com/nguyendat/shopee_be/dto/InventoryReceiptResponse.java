@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
+import java.util.Date;
 import java.util.List;
 import java.util.UUID;
 
@@ -17,7 +18,7 @@ public class InventoryReceiptResponse {
     private UUID id;
     private String receiptNumber;
     private String supplierName;
-    private java.util.Date receiptDate;
+    private Date receiptDate;
     private BigDecimal totalAmount;
     private String status;
     private String notes;

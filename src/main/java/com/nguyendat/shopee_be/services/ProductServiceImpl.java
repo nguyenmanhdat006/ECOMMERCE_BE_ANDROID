@@ -4,7 +4,11 @@ import com.nguyendat.shopee_be.dto.ProductDto;
 import com.nguyendat.shopee_be.entities.*;
 import com.nguyendat.shopee_be.exceptions.ResourceNotFoundEx;
 import com.nguyendat.shopee_be.mapper.ProductMapper;
+import com.nguyendat.shopee_be.repositories.CategoryRepository;
+import com.nguyendat.shopee_be.repositories.CategoryTypeRepository;
 import com.nguyendat.shopee_be.repositories.ProductRepository;
+import com.nguyendat.shopee_be.exceptions.ConflictException;
+import org.springframework.transaction.annotation.Transactional;
 import com.nguyendat.shopee_be.specification.ProductSpecification;
 import org.apache.coyote.BadRequestException;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,10 +32,44 @@ public class ProductServiceImpl implements ProductService{
     @Autowired
     private ProductMapper productMapper;
 
+    @Autowired
+    private CategoryRepository categoryRepository;
+
+    @Autowired
+    private CategoryTypeRepository categoryTypeRepository;
+
     @Override
-    public Product addProduct(ProductDto productDto) {
-        Product product = productMapper.mapToProductEntity(productDto);
-        return productRepository.save(product);
+    @Transactional
+    public ProductDto addProduct(ProductDto productDto) {
+        if (isBlank(productDto.getName()) || isBlank(productDto.getBrand()) || isBlank(productDto.getSlug())
+                || productDto.getPrice() == null || productDto.getCategoryId() == null || productDto.getCategoryTypeId() == null) {
+            throw new IllegalArgumentException("Thiếu thông tin bắt buộc: name, price, brand, slug, categoryId, categoryTypeId");
+        }
+        if (productDto.getPrice().signum() < 0) {
+            throw new IllegalArgumentException("Giá sản phẩm không được âm");
+        }
+        if (productRepository.findBySlug(productDto.getSlug()) != null) {
+            throw new ConflictException("Slug đã tồn tại: " + productDto.getSlug());
+        }
+        productDto.setId(null);
+        Product saved = productRepository.save(productMapper.mapToProductEntity(productDto));
+        return toDetailDto(saved);
+    }
+
+    // Dạng chi tiết: thông tin sản phẩm kèm danh mục, biến thể, ảnh
+    private ProductDto toDetailDto(Product product) {
+        ProductDto dto = productMapper.mapProductToDto(product);
+        dto.setCategoryId(product.getCategory().getId());
+        dto.setCategoryTypeId(product.getCategoryType().getId());
+        dto.setCategoryName(product.getCategory().getName());
+        dto.setCategoryTypeName(product.getCategoryType().getName());
+        dto.setVariants(productMapper.mapProductVariantListToDto(product.getProductVariants()));
+        dto.setProductResources(productMapper.mapProductResourcesListDto(product.getResources()));
+        return dto;
+    }
+
+    private static boolean isBlank(String s) {
+        return s == null || s.isBlank();
     }
 
     @Override
@@ -88,11 +126,37 @@ public class ProductServiceImpl implements ProductService{
         return productDto;
     }
 
+    // Cập nhật một phần: chỉ ghi các trường có gửi lên. Biến thể và ảnh có API riêng; rating do hệ thống tính.
     @Override
-    public Product updateProduct(ProductDto productDto, UUID id) {
+    @Transactional
+    public ProductDto updateProduct(ProductDto dto, UUID id) {
         Product product = productRepository.findById(id).orElseThrow(()-> new ResourceNotFoundEx("Product Not Found!"));
-        productDto.setId(product.getId());
-        return productRepository.save(productMapper.mapToProductEntity(productDto));
+
+        if (dto.getName() != null) product.setName(dto.getName());
+        if (dto.getDescription() != null) product.setDescription(dto.getDescription());
+        if (dto.getBrand() != null) product.setBrand(dto.getBrand());
+        if (dto.getNewArrival() != null) product.setNewArrival(dto.getNewArrival());
+        if (dto.getPrice() != null) {
+            if (dto.getPrice().signum() < 0) {
+                throw new IllegalArgumentException("Giá sản phẩm không được âm");
+            }
+            product.setPrice(dto.getPrice());
+        }
+        if (dto.getSlug() != null && !dto.getSlug().equals(product.getSlug())) {
+            if (productRepository.findBySlug(dto.getSlug()) != null) {
+                throw new ConflictException("Slug đã tồn tại: " + dto.getSlug());
+            }
+            product.setSlug(dto.getSlug());
+        }
+        if (dto.getCategoryId() != null) {
+            product.setCategory(categoryRepository.findById(dto.getCategoryId())
+                    .orElseThrow(() -> new ResourceNotFoundEx("Category not found with id: " + dto.getCategoryId())));
+        }
+        if (dto.getCategoryTypeId() != null) {
+            product.setCategoryType(categoryTypeRepository.findById(dto.getCategoryTypeId())
+                    .orElseThrow(() -> new ResourceNotFoundEx("CategoryType not found with id: " + dto.getCategoryTypeId())));
+        }
+        return toDetailDto(productRepository.save(product));
     }
 
     @Override
@@ -178,8 +242,14 @@ public class ProductServiceImpl implements ProductService{
     }
 
     @Override
+    @Transactional
     public void deleteProductById(UUID id) {
         Product product = productRepository.findById(id).orElseThrow(() -> new ResourceNotFoundEx("Product Not Found!"));
+        // Quan hệ JPA có cascade nên xóa sản phẩm đã bán sẽ xóa luôn lịch sử đơn hàng, phiếu nhập; chặn từ đầu
+        boolean used = !product.getOrderItems().isEmpty() || !product.getInventoryReceiptItems().isEmpty() || !product.getStockMovements().isEmpty();
+        if (used) {
+            throw new ConflictException("Sản phẩm đã phát sinh đơn hàng, phiếu nhập hoặc biến động kho nên không thể xóa");
+        }
         productRepository.delete(product);
     }
 

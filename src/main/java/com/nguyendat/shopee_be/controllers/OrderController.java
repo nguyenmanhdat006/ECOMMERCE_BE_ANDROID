@@ -15,6 +15,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import jakarta.validation.Valid;
+import com.nguyendat.shopee_be.ultil.AccessUtil;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import com.nguyendat.shopee_be.entities.User;
 
@@ -42,8 +44,10 @@ public class OrderController {
 
     @GetMapping("/{id}")
     @Operation(summary = "Get order by id")
-    public ResponseEntity<OrderResponse> getById(@PathVariable UUID id) {
+    public ResponseEntity<OrderResponse> getById(@PathVariable UUID id, @AuthenticationPrincipal User user) {
         Order order = orderService.findById(id);
+        // Chỉ chủ đơn hoặc ADMIN được xem
+        AccessUtil.requireOwnerOrAdmin(user, order.getCustomer() != null ? order.getCustomer().getId() : null);
         return new ResponseEntity<>(toOrderResponse(order), HttpStatus.OK);
     }
 
@@ -71,6 +75,7 @@ public class OrderController {
                 .orderDate(order.getOrderDate())
                 .totalAmount(order.getTotalAmount())
                 .status(order.getStatus() != null ? order.getStatus().name() : null)
+                .paymentStatus(order.getPaymentStatus() != null ? order.getPaymentStatus().name() : null)
                 .paymentMethod(order.getPaymentMethod())
                 .shippingAddress(order.getShippingAddress())
                 .notes(order.getNotes())
@@ -123,13 +128,14 @@ public class OrderController {
 
     @PostMapping
     @Operation(summary = "Create order")
-    public ResponseEntity<Order> create(@RequestBody OrderRequest request) {
-        Order created = orderService.create(request);
+    public ResponseEntity<Order> create(@AuthenticationPrincipal User user, @Valid @RequestBody OrderRequest request) {
+        // Người đặt luôn là người đang đăng nhập; giá và tổng tiền do máy chủ tính
+        Order created = orderService.create(request, user);
         return new ResponseEntity<>(created, HttpStatus.CREATED);
 }
 
     @DeleteMapping("/{id}")
-    @Operation(summary = "Delete order")
+    @Operation(summary = "Delete order (ADMIN, only CANCELED or REFUND orders)")
     public ResponseEntity<Void> delete(@PathVariable UUID id) {
         orderService.deleteById(id);
         return ResponseEntity.ok().build();
@@ -137,15 +143,18 @@ public class OrderController {
     
     @PatchMapping("/{id}/status")
     @Operation(summary = "Update order status")
-    public ResponseEntity<Order> updateStatus(@PathVariable UUID id, @RequestBody UpdateStatusRequest request, @RequestParam String changedBy) {
-        Order updated = orderService.updateStatus(id, OrderStatus.valueOf(request.getStatus()), changedBy);
+    public ResponseEntity<Order> updateStatus(@PathVariable UUID id, @RequestBody UpdateStatusRequest request,
+                                              @RequestParam(required = false) String changedBy, @AuthenticationPrincipal User admin) {
+        // Người thực hiện lấy từ token (tham số changedBy chỉ còn để tương thích, không dùng)
+        Order updated = orderService.updateStatus(id, OrderStatus.valueOf(request.getStatus()), admin.getEmail());
         return ResponseEntity.ok(updated);
     }
 
     @PatchMapping("/{id}/payment-status")
     @Operation(summary = "Update payment status")
-    public ResponseEntity<Order> updatePaymentStatus(@PathVariable UUID id, @RequestBody UpdatePaymentStatusRequest request, @RequestParam String changedBy) {
-        Order updated = orderService.updatePaymentStatus(id, PaymentStatus.valueOf(request.getStatus()), changedBy);
+    public ResponseEntity<Order> updatePaymentStatus(@PathVariable UUID id, @RequestBody UpdatePaymentStatusRequest request,
+                                                     @RequestParam(required = false) String changedBy, @AuthenticationPrincipal User admin) {
+        Order updated = orderService.updatePaymentStatus(id, PaymentStatus.valueOf(request.getStatus()), admin.getEmail());
         return ResponseEntity.ok(updated);
     }
 

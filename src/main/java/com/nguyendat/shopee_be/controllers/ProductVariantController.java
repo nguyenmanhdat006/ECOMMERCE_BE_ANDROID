@@ -1,9 +1,11 @@
 package com.nguyendat.shopee_be.controllers;
 
-import com.nguyendat.shopee_be.entities.ProductVariant;
+import com.nguyendat.shopee_be.dto.ProductVariantRequest;
+import com.nguyendat.shopee_be.dto.ProductVariantResponse;
 import com.nguyendat.shopee_be.services.ProductVariantService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -23,32 +25,30 @@ public class ProductVariantController {
 
     @GetMapping
     @Operation(summary = "Get all product variants")
-    public ResponseEntity<List<ProductVariant>> getAll() {
+    public ResponseEntity<List<ProductVariantResponse>> getAll() {
         return new ResponseEntity<>(service.findAll(), HttpStatus.OK);
     }
 
     @GetMapping("/{id}")
     @Operation(summary = "Get product variant by id")
-    public ResponseEntity<ProductVariant> getById(@PathVariable UUID id) {
+    public ResponseEntity<ProductVariantResponse> getById(@PathVariable UUID id) {
         return new ResponseEntity<>(service.findById(id), HttpStatus.OK);
     }
 
     @PostMapping
-    @Operation(summary = "Create product variant")
-    public ResponseEntity<ProductVariant> create(@RequestBody ProductVariant entity) {
-        ProductVariant created = service.create(entity);
-        return new ResponseEntity<>(created, HttpStatus.CREATED);
+    @Operation(summary = "Create product variant for an existing product (ADMIN)")
+    public ResponseEntity<ProductVariantResponse> create(@Valid @RequestBody ProductVariantRequest request) {
+        return new ResponseEntity<>(service.create(request), HttpStatus.CREATED);
     }
 
     @PutMapping("/{id}")
-    @Operation(summary = "Update product variant")
-    public ResponseEntity<ProductVariant> update(@PathVariable UUID id, @RequestBody ProductVariant entity) {
-        ProductVariant updated = service.update(id, entity);
-        return new ResponseEntity<>(updated, HttpStatus.OK);
+    @Operation(summary = "Update product variant (ADMIN)")
+    public ResponseEntity<ProductVariantResponse> update(@PathVariable UUID id, @Valid @RequestBody ProductVariantRequest request) {
+        return new ResponseEntity<>(service.update(id, request), HttpStatus.OK);
     }
 
     @DeleteMapping("/{id}")
-    @Operation(summary = "Delete product variant")
+    @Operation(summary = "Delete product variant that has no orders, receipts or stock movements (ADMIN)")
     public ResponseEntity<Void> delete(@PathVariable UUID id) {
         service.deleteById(id);
         return ResponseEntity.ok().build();
